@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Thin wrapper: run scripts/cards.py using the project venv.
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/.venv/bin/python" "$DIR/scripts/cards.py" "$@"

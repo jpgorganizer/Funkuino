@@ -1,0 +1,32 @@
+# Local media library — mirrored to the ESPuino, not tracked here (large, private)
+files/
+
+# Python venv & caches
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Local, machine-specific config / secrets (e.g. changed FTP password, SDK token)
+config.env
+.env
+
+# Machine-local Claude Code / Studio-agent additions (never shared)
+CLAUDE.local.md
+.agent-allow.json
+.claude/settings.local.json
+
+# Per-device upload manifests (device/machine-specific)
+.sync-state/
+
+# Printable cover images (local, derived from downloads)
+card-covers/
+
+# Generated print sheets and the print manifest (local, derived from card-covers)
+print-sheets/
+.print-state.json
+
+# Transient per-agent-session intake progress files (Funkuino Studio)
+.studio-progress-*

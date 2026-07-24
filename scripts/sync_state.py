@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Local upload manifest for the ESPuino mirror.
+
+The device offers no cheap way to read a remote file's size (see espuino.py), so
+we cannot tell "changed" from "unchanged" by asking the device. Instead we keep
+a local record of what we last uploaded -- remote path -> (size, mtime) -- and
+compare the local files against it. Existence is still verified against the
+device (a fast, safe directory listing); this manifest only answers "did the
+*content* change since we last pushed it?".
+
+The manifest is keyed by the device's MAC address (its stable hardware
+identity), so the same files can be mirrored to several ESPuinos independently,
+and one device reached under different names (hostname vs IP) still shares a
+single manifest. The host name is kept only as a human-readable label. Manifests
+are machine-specific and git-ignored.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _slug(value: str) -> str:
+    """Filesystem-safe filename component (MAC address, host, …)."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", value) or "device"
+
+
+@dataclass
+class SyncState:
+    path: Path
+    device_id: str = ""  # MAC address (stable per device)
+    host: str = ""       # last host label used to reach it
+    files: dict[str, dict] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, state_dir: str | Path, device_id: str, host: str = "") -> "SyncState":
+        """Load (or start) the manifest for ``device_id`` inside ``state_dir``."""
+        path = Path(state_dir) / f"{_slug(device_id)}.json"
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text())
+                return cls(
+                    path=path,
+                    device_id=data.get("device_id", device_id),
+                    host=host or data.get("host", ""),
+                    files=data.get("files", {}),
+                )
+            except (ValueError, OSError):
+                pass  # corrupt/unreadable -> start fresh
+        return cls(path=path, device_id=device_id, host=host)
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"device_id": self.device_id, "host": self.host, "files": self.files}
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=1, ensure_ascii=False))
+        tmp.replace(self.path)  # atomic
+
+    def get(self, remote_path: str) -> dict | None:
+        return self.files.get(remote_path)
+
+    def is_pending(self, remote_path: str) -> bool:
+        """True if an upload was started for this file but never confirmed
+        complete (e.g. the previous run crashed or was Ctrl+C'd mid-upload)."""
+        entry = self.files.get(remote_path)
+        return bool(entry) and bool(entry.get("pending"))
+
+    def is_unchanged(self, remote_path: str, size: int, mtime: int) -> bool:
+        """True only if this file was fully uploaded (not pending) and matches
+        the recorded size and is no newer than the recorded mtime."""
+        entry = self.files.get(remote_path)
+        return (bool(entry) and not entry.get("pending")
+                and entry.get("size") == size and entry.get("mtime", 0) >= mtime)
+
+    def mark_pending(self, remote_path: str) -> None:
+        """Record that an upload is about to start, and persist immediately so a
+        crash mid-upload is remembered and the file is re-uploaded next time."""
+        self.files[remote_path] = {"pending": True}
+        self.save()
+
+    def mark_synced(self, remote_path: str, size: int, mtime: int) -> None:
+        """Record a confirmed-complete upload and persist immediately."""
+        self.files[remote_path] = {"size": size, "mtime": mtime}
+        self.save()
+
+    def adopt(self, remote_path: str, size: int, mtime: int) -> None:
+        """Trust a file that already exists on the device and was never touched
+        by us (pre-populated library). Not persisted per-call; the final save()
+        writes it (re-derived harmlessly if the run is interrupted first)."""
+        self.files[remote_path] = {"size": size, "mtime": mtime}
+
+    def forget(self, remote_path: str) -> None:
+        self.files.pop(remote_path, None)
+        self.save()

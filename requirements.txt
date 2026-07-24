@@ -1,0 +1,6 @@
+requests>=2.31         # ESPuino HTTP API client
+websocket-client>=1.9   # send control commands via the /ws websocket
+yt-dlp>=2026.7          # download audio into files/ for the ESPuino
+Pillow>=11.0            # crop covers & compose printable card sheets (cards.py)
+aiohttp>=3.10           # async web server for the Studio app (studio.py)
+claude-agent-sdk>=0.1   # embedded Claude agent sessions (studio_agent.py)

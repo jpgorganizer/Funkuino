@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""Client library for managing an ESPuino over its HTTP API.
+
+Everything here talks to the same HTTP ``/explorer`` REST API that the device's
+own web interface uses (documented in the firmware's REST-API.yaml / the Swagger
+UI at http://<host>/swagger). We deliberately do NOT use the device's FTP
+server -- see the "Why not FTP?" and "Device quirks" notes below.
+
+Device quirks discovered on firmware 2026xxxx-DEV (ESP32-D0WD-V3), all worked
+around in this module:
+
+* mDNS is slow: every new TCP connection to ``espuino.local`` costs ~5 s for
+  name resolution on macOS, and the server sends ``Connection: close`` so each
+  request is a fresh connection. Resolving the hostname to an IP ONCE (see
+  ``ESPuino._resolve``) makes every request ~0.03 s instead of ~5 s.
+* Only ONE storage operation may be in flight at a time. Uploads must be
+  strictly sequential, and you must never leave a download half-read: closing a
+  streaming GET early wedges the SD writer and makes the next upload fail with
+  HTTP 500. Therefore we never probe file sizes via a partial download.
+* There is no cheap way to read a remote file's size: the ``/explorer`` listing
+  omits sizes, a HEAD to ``/explorerdownload`` returns a stale/constant length,
+  and reading Content-Length from a real GET means downloading the whole file.
+  So change detection uses a local manifest instead (see sync_state.py).
+
+  The FTP server does NOT interfere with HTTP uploads: uploads return HTTP 200
+  whether FTP is running or stopped. The only thing that wedges the SD writer is
+  a half-read streaming GET, which is why this module never does one.
+
+Why not FTP? The firmware's FTP library (Joe91/ESP-FTP-Server-Lib) cannot list
+directory contents (LIST/MLSD return only '.'/'..') and does not implement SIZE,
+so it is useless for rsync-style change detection; it must also be re-enabled
+after every reboot. The HTTP API does everything we need and is always
+available, so we use it exclusively.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import posixpath
+import socket
+import time
+import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterator, Optional
+
+import requests
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# --- Defaults ---------------------------------------------------------------
+DEFAULT_HOST = "espuino.local"
+DEFAULT_LOCAL_DIR = REPO_ROOT / "files"
+DEFAULT_REMOTE_ROOT = "/"
+# Full-resolution title images (for printing RFID cards) live here, mirroring the
+# files/ layout. Not uploaded (the device has no display); see IGNORE_PATTERNS.
+DEFAULT_COVERS_DIR = REPO_ROOT / "card-covers"
+HTTP_PORT = 80
+
+# Web-interface control command codes (firmware src/values.h), sent over the
+# /ws websocket as {"controls":{"action":<code>}}.
+CMD_TELL_IP_ADDRESS = 151
+CMD_PLAYPAUSE = 170
+CMD_NEXTTRACK = 172
+CMD_STOP = 182
+CMD_RESTARTSYSTEM = 183
+
+# Files/dirs that stay local and are never uploaded: macOS/editor cruft, and
+# cover images (the device has no display — covers live next to the audio only
+# for the computer and for printing RFID cards).
+IGNORE_PATTERNS = (
+    ".DS_Store",
+    "._*",
+    ".Spotlight-V100",
+    ".Trashes",
+    ".fseventsd",
+    ".TemporaryItems",
+    ".apdisk",
+    "@eaDir",
+    "Thumbs.db",
+    "desktop.ini",
+    "*.tmp",
+    ".git",
+    ".album",   # local folder-is-an-album marker; must never reach the device
+    "*.jpg",
+    "*.jpeg",
+    "*.png",
+    "*.gif",
+    "*.bmp",
+    "*.webp",
+)
+
+Logger = Callable[[str], None]
+
+
+class _ProgressReader:
+    """A read-only, sized body wrapper that reports upload progress.
+
+    requests reads it in chunks and (because of ``__len__``) still sends a
+    Content-Length rather than chunked encoding — which the device requires.
+    ``callback(sent, total)`` is invoked as bytes are consumed."""
+
+    def __init__(self, data: bytes, callback: Callable[[int, int], None]):
+        self._data = data
+        self._total = len(data)
+        self._pos = 0
+        self._cb = callback
+
+    def __len__(self) -> int:
+        return self._total
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._data[self._pos:] if size < 0 else self._data[self._pos:self._pos + size]
+        self._pos += len(chunk)
+        if chunk:
+            self._cb(self._pos, self._total)
+        return chunk
+
+
+# --- Configuration ----------------------------------------------------------
+@dataclass
+class Config:
+    host: str = DEFAULT_HOST
+    local_dir: Path = DEFAULT_LOCAL_DIR
+    remote_root: str = DEFAULT_REMOTE_ROOT
+    http_port: int = HTTP_PORT
+    # Optional HTTP basic auth (only if the web interface is password protected).
+    http_user: Optional[str] = None
+    http_password: Optional[str] = None
+
+    @classmethod
+    def from_env(cls, **overrides) -> "Config":
+        """Defaults, overlaid with ESPUINO_* env vars, then explicit (non-None)
+        keyword overrides (typically CLI arguments)."""
+        cfg = cls(
+            host=os.environ.get("ESPUINO_HOST", DEFAULT_HOST),
+            local_dir=Path(os.environ.get("ESPUINO_LOCAL_DIR", str(DEFAULT_LOCAL_DIR))),
+            remote_root=os.environ.get("ESPUINO_REMOTE_ROOT", DEFAULT_REMOTE_ROOT),
+            http_user=os.environ.get("ESPUINO_HTTP_USER") or None,
+            http_password=os.environ.get("ESPUINO_HTTP_PASSWORD") or None,
+        )
+        for key, value in overrides.items():
+            if value is not None:
+                if key == "local_dir":
+                    value = Path(value)
+                setattr(cfg, key, value)
+        return cfg
+
+
+# --- Helpers ----------------------------------------------------------------
+def is_ignored(name: str) -> bool:
+    return any(fnmatch.fnmatch(name, pat) for pat in IGNORE_PATTERNS)
+
+
+def cover_path_for(media_path: str | Path, lib_dir: str | Path,
+                   covers_dir: str | Path = DEFAULT_COVERS_DIR) -> Path:
+    """Map an audio file under ``lib_dir`` to its cover image under
+    ``covers_dir`` (same relative path, .jpg)."""
+    rel = Path(media_path).resolve().relative_to(Path(lib_dir).resolve())
+    return Path(covers_dir) / rel.with_suffix(".jpg")
+
+
+def join_remote(base: str, *parts: str) -> str:
+    """Join remote path parts using POSIX separators, keeping a leading '/'.
+
+    The result is Unicode-normalised to NFC because the device stores names in
+    NFC while macOS hands us decomposed (NFD) names from the local filesystem;
+    without this, e.g. 'Frühling' (device) would never match 'Frühling'
+    (local) and every accented file would look missing and be re-uploaded.
+    """
+    path = base
+    for part in parts:
+        if part in ("", "."):
+            continue
+        path = posixpath.join(path, part)
+    return unicodedata.normalize("NFC", posixpath.normpath(path))
+
+
+# --- Client -----------------------------------------------------------------
+class ESPuino:
+    """Client for the ESPuino HTTP file-management API."""
+
+    def __init__(self, cfg: Config, timeout: float = 15.0, upload_timeout: float = 600.0):
+        self.cfg = cfg
+        self.timeout = timeout
+        self.upload_timeout = upload_timeout
+        self.session = requests.Session()
+        if cfg.http_user:
+            self.session.auth = (cfg.http_user, cfg.http_password or "")
+        self._addr = self._resolve(cfg.host)
+        self.base = f"http://{self._addr}:{cfg.http_port}"
+
+    @staticmethod
+    def _resolve(host: str) -> str:
+        """Resolve host to an IP once, so we don't pay ~5 s of mDNS per request.
+        Falls back to the original host if resolution fails."""
+        try:
+            return socket.gethostbyname(host)
+        except OSError:
+            return host
+
+    # -- device info / state --
+    def info(self) -> dict:
+        r = self.session.get(f"{self.base}/info", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def restart(self) -> None:
+        """Reboot the device (also the only way to stop the FTP server)."""
+        try:
+            self.session.post(f"{self.base}/restart", timeout=self.timeout)
+        except requests.RequestException:
+            pass  # the device drops the connection as it reboots
+
+    # -- directory listing (fast + safe: reads fully, closes cleanly) --
+    def list_dir(self, path: str) -> list[tuple[str, bool]]:
+        """Return [(name, is_dir), ...] for a remote directory.
+
+        A directory that does not exist yet is reported by the firmware as HTTP
+        404 or 501; we treat both as "empty" so callers can index a remote root
+        that has not been created yet."""
+        r = self.session.get(
+            f"{self.base}/explorer", params={"path": path}, timeout=self.timeout
+        )
+        if r.status_code in (404, 501):
+            return []
+        r.raise_for_status()
+        entries: list[tuple[str, bool]] = []
+        for obj in r.json():
+            if "root" in obj:  # filesystem marker, e.g. {"name":"/","root":"sd"}
+                continue
+            name = obj.get("name", "")
+            if name in ("", "/", ".", ".."):
+                continue
+            entries.append((name, bool(obj.get("dir", False))))
+        return entries
+
+    def walk(self, root: str) -> Iterator[tuple[str, bool]]:
+        """Depth-first walk yielding (path, is_dir); dirs come after their
+        contents so they can be removed safely."""
+        for name, is_dir in self.list_dir(root):
+            path = join_remote(root, name)
+            if is_dir:
+                yield from self.walk(path)
+                yield (path, True)
+            else:
+                yield (path, False)
+
+    def remote_index(self, root: str) -> tuple[set[str], set[str]]:
+        """Return (files, dirs) sets of all remote paths under ``root``."""
+        files: set[str] = set()
+        dirs: set[str] = set()
+        for path, is_dir in self.walk(root):
+            (dirs if is_dir else files).add(path)
+        return files, dirs
+
+    # -- mutations --
+    def upload(self, local_path: str | Path, remote_path: str,
+               progress: Optional[Callable[[int, int], None]] = None) -> None:
+        """Upload one file (raw octet-stream body, path incl. filename as a
+        query param), exactly like the web UI. Parent dirs are auto-created.
+        Callers MUST serialise uploads. ``progress(sent, total)`` is called as
+        the body is sent.
+
+        The device writes to SD slower than the network delivers, so a large
+        POST body fills the TCP window and ``sendall`` blocks; a fixed short
+        timeout then aborts a big upload part-way (the device keeps a truncated
+        file). We therefore scale the socket timeout to the file size (assuming a
+        conservative ~40 KiB/s floor). A single timeout value covers connect,
+        send AND read, so the slow body send is not cut off."""
+        data = Path(local_path).read_bytes()  # in-memory => explicit Content-Length
+        timeout = max(self.timeout, len(data) // (40 * 1024))
+        # The device occasionally resets a connection mid-request; retry a couple
+        # of times before giving up (a re-upload just overwrites).
+        for attempt in range(3):
+            try:
+                body = _ProgressReader(data, progress) if progress else data
+                r = self.session.post(
+                    f"{self.base}/explorer",
+                    params={"path": remote_path},
+                    data=body,
+                    headers={"Content-Type": "application/octet-stream"},
+                    timeout=timeout,
+                )
+                r.raise_for_status()
+                return
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt == 2:
+                    raise
+                time.sleep(1.5)
+
+    def mkdir(self, path: str) -> None:
+        r = self.session.put(
+            f"{self.base}/explorer", params={"path": path}, timeout=self.timeout
+        )
+        r.raise_for_status()
+
+    def delete(self, path: str) -> None:
+        """Delete a remote file or directory. NOTE: the firmware stops playback
+        (CMD_STOP) before deleting."""
+        r = self.session.delete(
+            f"{self.base}/explorer", params={"path": path}, timeout=self.timeout
+        )
+        r.raise_for_status()
+
+    def rename(self, src: str, dst: str) -> None:
+        r = self.session.patch(
+            f"{self.base}/explorer",
+            params={"srcpath": src, "dstpath": dst},
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+
+    # -- control commands (websocket) --
+    def send_command(self, action: int) -> dict:
+        """Trigger a CMD_* control command over the web-interface websocket."""
+        import websocket  # from the `websocket-client` package
+
+        ws = websocket.create_connection(
+            f"ws://{self._addr}:{self.cfg.http_port}/ws", timeout=10
+        )
+        try:
+            ws.send(json.dumps({"controls": {"action": action}}))
+            ws.settimeout(5)
+            try:
+                return json.loads(ws.recv())
+            except Exception:
+                return {}
+        finally:
+            ws.close()

@@ -1,0 +1,483 @@
+# Funkuino — ESPuino management
+
+Tooling to manage an [ESPuino](https://espuino.de) (an ESP32-based, RFID-controlled
+audio player for kids) over the network, so the media library and settings can be
+driven from scripts instead of clicking through the web interface.
+
+The primary users are German-speaking (the Studio UI and the embedded agent
+talk German); **code and documentation stay in English.**
+
+## The device
+
+- Reachable at `espuino.local` by default; any hostname/IP works via `--host`
+  or `ESPUINO_HOST`.
+- Firmware: ESPuino `dev` branch — a prebuilt GitHub build (reports e.g.
+  `20260720-DEV`), installed via OTA through the device's own web interface, not
+  compiled locally. FTP credentials default to `esp32` / `esp32`.
+- The audio library lives on the attached storage. The same files are kept
+  locally in `files/` (git-ignored — large & private); the mirror pushes `files/`
+  to the device.
+- Firmware source: [biologist79/ESPuino](https://github.com/biologist79/ESPuino)
+  (`dev` branch). A local checkout is the reference for API/behaviour questions
+  and the workbench for custom-firmware branches (see Roadmap; first shipped
+  fix: upstream PR #444). PlatformIO builds need a venv with a PlatformIO
+  version that resolves the pioarduino platform (6.2.0a3 works, stock 6.1.19
+  does not).
+
+## Layout
+
+```
+Funkuino/
+  sync                  # wrapper: rsync-style mirror to the device
+  download              # wrapper: fetch audio into files/ (yt-dlp)
+  prepare               # wrapper: merge a folder of tracks into one audiobook
+  covers                # wrapper: extract title images into card-covers/
+  cards                 # wrapper: lay out card-covers/ into printable PDFs
+  cards-ui              # wrapper: interactive browser card picker (cards.py -i)
+  studio                # wrapper: Funkuino Studio web app (dashboard + agent)
+  scripts/
+    espuino.py          # HTTP API client + device quirks (the knowledge lives here)
+    sync_state.py       # per-device upload manifest
+    sync.py             # the rsync-style mirror CLI
+    download.py         # yt-dlp download in the ESPuino naming conventions
+    prepare.py          # concat + spoken intro (Hörspiel merge)
+    covers.py           # extract embedded covers -> card-covers/
+    cards.py            # compose printable A4 card sheets from card-covers/
+    cards_ui.py         # localhost web app for interactive card picking (cards -i)
+    print_state.py      # manifest of already-printed covers
+    studio.py           # Studio: aiohttp server, WS hub, sync/cards jobs
+    studio_state.py     # Studio: library scan -> per-card pipeline status
+    studio_agent.py     # Studio: Claude Agent SDK session manager
+    studio_web/         # Studio: vanilla-JS frontend (index.html, app.js, style.css)
+  files/                # local media library (git-ignored) -> mirrored to device
+  card-covers/          # git-ignored; full-res title images for printing cards
+  print-sheets/         # git-ignored; generated printable PDFs
+  requirements.txt      # requests, websocket-client, yt-dlp, Pillow, aiohttp, claude-agent-sdk
+  .venv/                # git-ignored; created from requirements.txt
+  .env                  # git-ignored; SDK_TOKEN=… (from `claude setup-token`) for the Studio agent
+  .sync-state/          # git-ignored; per-device manifests (<mac>.json)
+  .print-state.json     # git-ignored; which covers have been printed
+```
+
+External tools: **ffmpeg** (audio conversion/merge) and macOS **`say`** (spoken
+intros) must be on PATH; `id3v2` is not required. Python deps (incl. **Pillow**
+for the card sheets) come from `requirements.txt` in the venv.
+
+## Quickstart
+
+```bash
+# one-time setup
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+./sync                 # upload new/changed files from files/ to the device
+./sync --dry-run       # show what would change, touch nothing
+./sync --delete        # also remove device files not present locally
+./sync --host <ip>     # target a specific device
+```
+
+Config precedence: CLI flags > `ESPUINO_*` env vars > defaults. Relevant vars:
+`ESPUINO_HOST`, `ESPUINO_LOCAL_DIR`, `ESPUINO_REMOTE_ROOT`, and
+`ESPUINO_HTTP_USER` / `ESPUINO_HTTP_PASSWORD` (only if the web UI is password
+protected).
+
+## How the mirror works (and why)
+
+One-way mirror `files/ -> device`, rsync-style:
+
+1. **Existence** comes from a fast recursive HTTP directory listing.
+2. **Change detection** comes from a local per-device manifest
+   (`.sync-state/<mac>.json`) recording the size+mtime of each file we last
+   uploaded — the device offers no cheap way to read a remote file's size.
+3. New and changed files are uploaded (strictly one at a time). `--delete`
+   removes device files/dirs absent locally (with a guard: it refuses if the
+   local side is empty; `/backup.txt` is never deleted).
+
+**Crash / Ctrl+C safety (important).** A file is only ever trusted as synced
+after its upload *confirmably* completed:
+
+* Before an upload starts we write a `pending` marker for that path and save the
+  manifest immediately; after success we overwrite it with size+mtime and save
+  again. So the manifest is written incrementally, not once at the end.
+* A `pending` entry left by an interrupted run means "we started this and never
+  confirmed it" → it is re-uploaded next run, never skipped. This is why an
+  aborted upload cannot leave a silently-truncated file that later looks done.
+* `adopt` (trusting a file that is on the device but not in our manifest, e.g. a
+  pre-populated library) is **off by default** — we cannot verify such a file is
+  not a truncated leftover, so we re-upload it. Pass `--adopt-existing` only for
+  the deliberate one-time seeding of a device already known to hold good files.
+
+**Large files.** The device writes to SD slower than the network delivers, so a
+big POST body fills the TCP window and the send blocks; a fixed short timeout
+would abort it part-way (leaving a truncated file). The upload timeout is
+therefore scaled to the file size (≥40 KiB/s floor) — needed for the ~30–40 MB
+Hörspiel files. Observed throughput is ~700–800 KiB/s.
+
+**Device identity:** each sync first calls `/info` and keys the manifest by the
+device's **MAC address** (`.sync-state/<mac>.json`), not the host name. So the
+same physical device reached as `espuino.local` or by IP shares one manifest,
+and two different ESPuinos get independent manifests automatically — just run
+`./sync --host A` and `./sync --host B` (give the second device a distinct
+hostname). The host name is stored only as a label.
+
+## Downloading & preparing audio
+
+`./download <url>` fetches audio into `files/` in the library's conventions
+(128 kbps MP3, embedded cover + title/artist tags, umlauts/spaces kept). It
+auto-detects the kind; override any name part with flags.
+
+| Kind | Trigger | Result |
+|------|---------|--------|
+| Single song | single video | `Lieder/<Artist> - <Title>.mp3` |
+| Music album | playlist | `<Artist> - <Album>/<NN> <Title>.mp3` (index as wide as the track count needs → keeps album order) |
+| Hörspiel | playlist + `--audiobook` | `<Series>/<NNN> - <Title>.mp3` — all parts merged into ONE file with a spoken "<Series>. <Title>." intro (Folge index always 3 digits) |
+
+Names come from source metadata. For an **album** the flat playlist is useless
+(no artist; it titles itself `Album - <name>`), so `do_album` probes the first
+track's tags for the real `artist`/`album` and strips any `Album -/EP -/Single -`
+prefix — a plain `./download <album-url>` now yields a sane `<Artist> - <Album>/`
+without a first failed attempt. Still pass `--artist`/`--album` when you want a
+specific attribution: the track tag credits the *performer* (e.g. Der
+Traumzauberbaum tags as `Helmut Müller-Lankow`), not always the composer/name a
+human expects (`Reinhard Lakomy`). For a Hörspiel you must pass `--series`,
+`--number`, `--title` (source titles are unreliable) — and often `--intro`,
+because the folder name may not be speakable (e.g. folder `Die drei ??? Kids`
+but intro `"Die drei Fragezeichen Kids. Panik im Paradies."`). yt-dlp cannot tell
+a Hörspiel from a music album, so `--audiobook` is explicit — the assistant
+picks it per URL. `--sync` mirrors to the device afterwards.
+
+```bash
+./download "<song-url>"
+./download "<album-url>" --artist "Rolf Zuckowski" --album "Meine Lieder"
+./download "<url>" --audiobook --series "Bibi und Tina" --number 1 --title "Das Fohlen"
+```
+
+### Multi-story Hörspiel-Folge (one folder, one card, stories navigable)
+
+Some releases are a single *Folge* bundling several self-contained stories, each
+split into `… - Teil 1/2/…` parts (e.g. *Kleiner Dodo - Folge 1* = 17 tracks = 7
+stories). yt-dlp sees a plain music album; a plain `./download` lands them as 17
+separate part-tracks. What we actually want (decided with the user):
+
+- **One file per _story_** — not per part, not one giant merged Folge: group the
+  tracks by the text before ` - ` and merge each story's parts with
+  `ffmpeg -f concat -c copy` (no re-encode), named `NN <Story>.mp3` in the
+  original appearance order.
+- **Folder layout `files/<Series>/<Folge N>/`** — the *Folge* folder is the card:
+  it plays as one playlist and the ESPuino's prev/next buttons step between the
+  stories. So `files/Kleiner Dodo/Folge 1/01 Der seltsame Kasten.mp3`, ….
+- **One cover for the whole folder** at `card-covers/<Series>/<Folge N>.jpg`
+  (mirrors the folder = one card), *not* one per story. `do_album` already saves
+  a single folder cover — just move it to the mirrored path.
+- **No spoken intro, no embedded cover** (device has no display; stories are
+  self-contained), and **drop any marketing parenthetical** from names, e.g.
+  `(Das Original-Hörspiel zur TV-Serie)`.
+
+There is no `./download` flag for this shape yet — download as an album, then run
+the per-story regroup+merge (ad-hoc script; folder → `<Series>/<Folge N>/`).
+
+`./prepare <folder>` runs the Hörspiel merge standalone on any folder of tracks:
+render a spoken intro with macOS `say` (system default voice — do **not** pass a
+named voice, they sound bad), and concat everything with `ffmpeg -c copy` (no
+re-encode; the intro is rendered to the tracks' exact sample-rate/channels so
+streams join cleanly). `spoken_title()` turns separators into sentence breaks so
+`say` pauses (`"A - B"` → `"A. B."`).
+
+**Cover art.** The device has **no display**, and a large cover at the very start
+of a file makes the first seconds stutter (the decoder reads the whole ID3 tag
+before audio). So audio is **not** given an embedded cover by default (`--embed-cover`
+opts back in). Instead the full-resolution title image is written to
+`card-covers/<same path>.jpg` — for printing RFID cards. `./covers` (re)extracts
+these from any already-embedded covers in `files/` (e.g. the existing library);
+new downloads save theirs automatically. Sync ignores image files, so covers
+never reach the device.
+
+One card == one RFID tag == one title image, so the granularity follows what a
+card plays: a Hörspiel is one merged file → one cover; a **song** is one file →
+one cover; an **album** is the whole *folder* played as one playlist → a **single**
+cover at `card-covers/<Artist> - <Album>.jpg` (download's `do_album` saves just
+one, not one-per-track). Note `./covers`, which walks `files/` per-mp3, would
+re-create per-track covers for an album — so re-extract albums with care.
+
+## Printing RFID cards
+
+`./cards` lays the `card-covers/` images out into printable A4 **PDF sheets**
+(`print-sheets/cards-<timestamp>.pdf`). The physical workflow: print a sheet,
+stick a round RFID tag on the back of each image, laminate the whole page, then
+cut it into square cards.
+
+- Cards are **6×6 cm** squares, **packed edge-to-edge** (3 per row → 3×4 = 12 per
+  page by default), so each internal cut is shared between two cards. Thin grey
+  **tick marks** in the page margins mark every cut line (top/bottom and
+  left/right) so a ruler can be laid edge-to-edge for one straight cut per line.
+- Source covers are typically 16:9 video thumbnails: a square title image (with
+  the episode title baked in) centred between solid colour bars. `cards.py`
+  **trims the uniform bars and centre-crops to a square** (`prepare_card` →
+  `_trim_uniform_border` + `_centre_square`), reproducing the manual crop. The
+  title text is inside the square, so it survives; the bars are only left/right.
+- **Manifest (`.print-state.json`, `print_state.py`).** Printing is
+  device-independent (a card maps to a *file*), so there is a single manifest at
+  the repo root — not one per device like sync. It records size+mtime per printed
+  cover. This is what makes **`./cards` with no arguments print only what's new**:
+  a cover counts as new if it is absent from the manifest or changed. A real run
+  marks the covers it placed as printed; the next plain `./cards` picks up only
+  newly-added ones.
+
+```bash
+./cards                     # NEW covers -> a fresh PDF, then mark them printed
+./cards --dry-run           # list what's new; write & mark nothing
+./cards "Bibi und Tina"     # only this subpath (still new-only unless --all)
+./cards --all               # include already-printed covers too
+./cards --no-mark           # make a PDF but leave the manifest untouched
+./cards --undo              # revert the last run: its covers are "new" again
+./cards --reset ["subpath"] # forget print history -> those covers are "new" again
+./cards-ui                  # same, via its own wrapper (easier to find)
+```
+
+**Interactive mode (`./cards-ui`, = `./cards -i`, `scripts/cards_ui.py`).** Where
+a plain `./cards` decides *for* you (everything new), this opens a small localhost web
+app to hand-pick exactly which covers land on one sheet — the whole point is to
+*see* the title images, which only an image grid can do. It shows every cover as
+a thumbnail (same trim/square-crop as the print), **newest first by creation
+date** (`st_birthtime`), with already-printed ones greyed and badged. Clicking a
+cover adds it (each gets its selection-order number); a counter tracks `N /
+<per_page>` (12 by default, follows `--cols`/`--card-cm`). Filling the page
+auto-renders the PDF and marks those covers printed; a "Seite erzeugen" button
+renders a partial page early. Two shortcut buttons bridge back to the plain
+`./cards` behaviour: **"Älteste N drucken"** (shown only when ≥ one full page of
+unprinted covers is waiting) one-clicks the oldest full page — the FIFO backlog —
+laid out sorted by path like `./cards`; **"Letzten Druck rückgängig"** does
+`./cards --undo` (revert the manifest, delete the tool's own sheet), and
+**hovering it spotlights exactly which printed cards that undo would revert** (the
+rest fade, the affected ones ring red) — correlated by the manifest's NFC key so
+it works regardless of macOS NFD/NFC filename form. It reuses
+`render_pages`/`save_pdf`/`PrintState` from cards.py verbatim, so its sheets are
+identical to `./cards`' and revert with the same `./cards --undo`. `--port` changes the port (default 8765); the `path`
+subpath filter and `--no-marks`/`--no-trim` apply as usual.
+
+**Full pages only.** You can only laminate whole A4 sheets, so a run whose last
+page is partial (e.g. 10/12 cards) prints a `NOTE:` saying how many more covers
+would fill it. The intended fix: **`./cards --undo`** drops that run (its covers
+count as new again *and* its auto-generated sheet in `print-sheets/` is deleted —
+a custom `--out` file is left in place), then download a couple more Hörspiele
+and re-run `./cards` for a full sheet. Undo is stackable (repeat to step further
+back); the manifest records each run's covers with their prior state so a run is
+reverted exactly, and `--reset` prunes that history too.
+
+Other flags: `--cols N`, `--card-cm F`, `--no-marks` (no cut ticks), `--no-trim`
+(skip bar trimming), `--out FILE`. Uses **Pillow**; pages render at 300 DPI.
+
+## Funkuino Studio (`./studio`)
+
+One localhost web app (default `http://127.0.0.1:8800`; `--port`, `--host <device>`,
+`--no-browser`) covering the whole workflow, with an embedded Claude agent. Tabs:
+**Bibliothek** (per-card pipeline view: Download · Cover · Sync · Druck · Karte —
+the status boxes are also the actions: Sync-box uploads the unit, Druck-box
+selects for printing via a floating print bar, Karte-box assigns/unassigns RFID
+cards), **Agent**, **Sync** (mirror with live log; Dry-Run always previews
+`--delete`), **Kartendruck** (the full card picker, integrated; sheets are
+`./cards --undo`-compatible).
+
+- **A unit = one RFID card**, derived from the `files/` naming conventions
+  (album folder, Hörspiel file, `Folge N` subfolder, Lieder track). A top-level
+  folder containing a **`.album` marker file** counts as an album too (used for
+  compilations like `Kinderweihnacht` that lack the `Artist - Album` name form);
+  the marker is in `espuino.IGNORE_PATTERNS`, so it never syncs to the device.
+  Pipeline status comes from the existing manifests only — sync from the newest
+  `.sync-state/*.json`, print from `.print-state.json`, covers from
+  `card-covers/` — Studio adds no state files of its own.
+- **RFID assignment lives in the Bibliothek**: Studio keeps a passive, persistent
+  websocket to the device (3 s `{"ping":{"ping":"ping"}}` keepalive, reconnect
+  with backoff) — it hears every card placement (`{"rfidId": …}` broadcast),
+  shows a sticky banner, and a click on a row's Karte-box assigns the card via
+  the device's `POST /rfid` (playMode defaults per kind: song 1, Hörspiel 3,
+  album/Folge 5; hover popover edits the mode). This listener also drives the
+  online/offline display (connection drop ⇒ offline within ~15 s).
+- **Download progress**: `download.py` writes a JSON status snapshot when
+  `FUNKUINO_PROGRESS_FILE` is set (strictly inert otherwise — see
+  `scripts/progress.py`); Studio sets it per agent session and streams the
+  polled snapshots to the intake strip as a real per-track progress bar.
+- **The agent is the Claude Agent SDK** (`claude-agent-sdk`), authenticated with
+  the subscription token in the git-ignored `.env` (`SDK_TOKEN=…`, created with
+  `claude setup-token`, valid ~1 year — recreate it when sessions fail with auth
+  errors). Sessions run in this repo with this CLAUDE.md loaded
+  (`setting_sources=["project"]`); pasting a URL starts the guided intake flow
+  (classify → download → verify naming/covers → report, questions in German).
+- **Permissions** (deliberate design decision): `permission_mode="auto"` +
+  guardrails. Read-only tools, the repo wrappers and `.venv/bin/python` are
+  allowlisted (deterministic, no classifier; a git-ignored `.agent-allow.json`
+  at the repo root may add machine-local patterns); an explicit **ask-list**
+  (`./sync`, `./cards`, `rm`, `rmdir`, `sudo`, `git push` — via `--settings`
+  JSON) always raises a browser permission card, because ask rules are
+  evaluated *before* the mode; everything else is decided silently by the
+  auto-mode classifier — it approves or **denies** (never asks; denials look
+  like failed tool calls to the agent). `AskUserQuestion` is on the ask-list
+  because auto mode routes around `can_use_tool`, which the question cards
+  depend on. Any `./sync` from the agent deliberately needs approval (it would
+  bypass Studio's device lock — even a dry-run does the full recursive device
+  listing) and is auto-denied while a Studio sync runs.
+- **Load-bearing SDK detail** (do not "simplify" away): sessions use
+  `client.connect()` with no prompt plus one `client.query()` per turn. Passing
+  a finite async-generator prompt instead makes the SDK close the input stream
+  and `can_use_tool` silently never fires — questions/permissions would hang.
+- Server binds 127.0.0.1 only; non-GET requests and the websocket require a
+  localhost `Host`/`Origin` (CSRF guard for a localhost tool).
+- A trivial agent turn costs ~$0.27 of subscription quota (the claude_code
+  system preset + this CLAUDE.md ride along on every session) — fine for intake
+  runs, just don't treat the Agent tab as a free chat window.
+
+## Device HTTP API (what we use)
+
+All file management uses the same endpoints as the device's own web UI
+(`http://<host>/swagger`, spec in `REST-API.yaml` in the ESPuino source). Paths
+here have **no** `/SD-Card` prefix (that prefix only exists over FTP).
+
+- `GET  /explorer?path=<dir>` → JSON `[{name, dir?}, …]`. **No sizes.** First
+  element is a filesystem marker (`{"name":"/","root":"sd"}`), skip it. A missing
+  directory returns 404/501 (treat as empty).
+- `POST /explorer?path=<full path incl. filename>` → upload. Body is the **raw
+  file bytes**; `Content-Type: application/octet-stream` is **required** (without
+  it the server returns 200 but silently drops the body). Parent dirs auto-created.
+- `PUT /explorer?path=<dir>` → mkdir. `DELETE /explorer?path=<p>` → delete file or
+  (recursively) dir; **stops playback first**. `PATCH /explorer?srcpath=&dstpath=`
+  → rename/move.
+- `GET /explorerdownload?path=<file>` → download (404 if missing).
+- `GET /info` → device/software/hardware/memory JSON.
+- Websocket `ws://<host>/ws`: `{"controls":{"action":<CMD>}}` triggers a control
+  command (codes in the ESPuino source, `src/values.h`), e.g. 183 = restart,
+  170 = play/pause. `{"ftpStatus":{"start":1}}` starts the FTP server.
+
+## Device quirks (hard-won — do not relearn these)
+
+- **mDNS is slow.** Each new TCP connection to `espuino.local` costs ~5 s of name
+  resolution on macOS, and the server sends `Connection: close`. The client
+  resolves the host to an IP **once** (`ESPuino._resolve`) → ~0.03 s per request.
+  Symptom if you regress: everything takes ~5 s per call.
+- **PN5180 loses a resting card briefly during playback** (observed: bursts,
+  every few s to tens of s; album restarts, or short pauses with
+  pauseIfRfidRemoved). NOT caused by Studio (reproduced with Studio fully off,
+  Wi-Fi off, two tag types, good static range). Firmware (dev) already has the
+  countermeasures: a 500 ms removal debounce ("PN5180 debounce" in the device
+  web UI — raise to 1000–1500 ms if needed, restart required) and no-reset-
+  while-present; if the web UI lacks that setting, the installed build predates
+  the fix → OTA update first. Symptom despite debounce ⇒ dropouts >500 ms,
+  most plausibly electrical (SD read bursts + amp current sagging the PN5180
+  field during playback). Alternative: disable pauseIfRfidRemoved and enable
+  dontAcceptRfidTwice (mutually exclusive) — kills restarts regardless of
+  dropout length. Full analysis: src/RfidPn5180.cpp state machine, debounce at
+  :198-206/:248-256, 100 ms command timeouts at :172-173.
+  **Measured (2026-07-23, serial log, build 04f1cc1):** stable phases are
+  random (4.5–66 s) but removal→re-detect is always **270–280 ms** — a
+  deterministic reset→setupRF→rescan path, NOT RF recovery. Implication: the
+  reader wedges (polls fail continuously) until the post-removal reset heals
+  it; fix #428's no-reset-while-present prevents exactly that healing reset,
+  so the debounce may never bridge the gap. Fork-patch idea: inside the
+  debounce window, after ~250–300 ms of consecutive failures, do a silent
+  reset()+setupRF() and keep polling — would absorb every observed event
+  without declaring removal. (Old build 2b8df17 already contained #428; the
+  20.7→22.7 build delta has no RFID commits — updating did not change the
+  behaviour.)
+  **SOLVED (2026-07-23), merged upstream as PR #444** — the fix ships in
+  official `dev` prebuilts from the merge onward; devices on older builds can
+  OTA a fork build (github.com/sadilek/ESPuino, branch
+  `fix/pn5180-inwindow-reset`) until then. True root cause:
+  after a successful read the ISO-14443 card sits SELECTed/ACTIVE and ignores
+  the library's REQA polls (post-#428 nothing power-cycles it back to IDLE), so
+  most polls at rest fail and only lucky field-cycles re-read; a >debounce
+  unlucky streak looked like removal. Fix (commit 77bb765): poll with WUPA and
+  park the card in HALT after each read (mifareHalt) → deterministic re-reads;
+  plus a silent-heal fallback at the debounce boundary (commit c56ed12) that
+  disambiguates wedge-vs-removal with one muted re-init sweep before ever
+  declaring removal (real removal now ~0.8 s). Verified on hardware: resting
+  card = silent log, no pauses/restarts; removal pauses promptly. Failed
+  attempts documented in git history (v1 aadb555: extra setupRF broke the
+  fast path; v2 d6d151d: healed fine but a 150 ms trigger fires on NORMAL
+  sub-debounce dropout runs → constant churn). Build: PlatformIO 6.2.0a3
+  (stock 6.1.19 can't resolve the pioarduino platform), env `complete`, OTA
+  image `.pio/build/complete/firmware.bin`.
+  **Upstream/forum state (researched 2026-07-23):** chronic issue since 2024
+  (forum thread 3454, reports through 04/2026); PR #428 is the latest partial
+  fix, no issue tracks persistence after it. PN5180-Library author (tueddy,
+  ATrappmann/PN5180-Library#48) confirms the chip goes unresponsive after a
+  corrupted response and needs an RF-field off/on — i.e. wedge-until-reset is
+  real. Reported hardware factors: Neopixel ring near the reader (EMI, badly
+  degrades range), feed PN5180 with 5 V not 3.3 V, lower rfidGain, module
+  quality variance. Our 275 ms instrumentation is more precise than anything
+  posted upstream — worth a #428 comment / forum post (draft on request).
+- **Device traffic degrades playback.** Uploads and even recursive listings
+  contend with active playback for Wi-Fi and SD on the ESP32 — the audio
+  stutters until the traffic stops (observed live: a background sync test made
+  a running Hörspiel skip repeatedly). The device cannot be asked whether it is
+  playing, so never run device-touching tests or background jobs unprompted;
+  assume a child may be listening and let the user time real syncs.
+- **One storage operation at a time.** Upload sequentially. **Never half-read a
+  streaming download** (`stream=True` + early `close()`): it wedges the SD writer
+  and the next upload fails with HTTP 500. This — not FTP — was the cause of
+  earlier upload failures. The client never does streaming reads.
+- **No cheap remote file size.** Listing omits sizes; `HEAD /explorerdownload`
+  returns a stale/constant length; a real GET means downloading the whole file.
+  Hence the local manifest for change detection.
+- **FTP is not useful here** and is **not used**:
+  - The firmware's FTP lib (`Joe91/ESP-FTP-Server-Lib`) `LIST`/`MLSD` return only
+    `.`/`..` (no file enumeration) and `SIZE` is unimplemented → can't diff.
+  - It mounts storage under a virtual `/SD-Card/…` root (HTTP uses `/…`).
+  - It must be re-enabled after every reboot.
+  - It does **not** interfere with HTTP uploads (uploads return 200 with FTP on
+    or off).
+  - Enable it (if ever needed) with websocket `{"ftpStatus":{"start":1}}` — works
+    any time. The control command `CMD_ENABLE_FTP_SERVER` (150) instead only works
+    within 30 s of boot (a deliberate "child protection" in `src/Cmd.cpp`).
+- Restarting drops the connection and takes ~10–20 s (Wi-Fi reconnect) to come
+  back; FTP is off again afterwards.
+- **Unicode NFC vs NFD.** macOS gives local filenames in decomposed form (NFD);
+  the device stores them composed (NFC). `join_remote` normalises every remote
+  path to NFC so accented names match (else every "Frühling"/"schönsten" file
+  looks missing). Files uploaded to the device by *other* tools in NFD can leave
+  a second, byte-distinct folder that looks identical in the web UI (we saw an
+  orphan NFD "Die schönsten Herbstlieder" alongside the real NFC one). Because we
+  normalise, `--delete` cannot see such NFD-orphan folders — clean them manually
+  (list root, find the entry whose codepoints are decomposed, `DELETE` it).
+  macOS junk (`._*`, `.DS_Store`) on the device *is* removed by `--delete`.
+- The web UI's file tree caches; after cleaning up on the device, reload it or it
+  shows stale duplicates.
+
+## Roadmap / notes
+
+- **Optional custom firmware:** the single most useful change would be adding a
+  `size` field to the `GET /explorer` listing (`entry["size"] = file.size()` in
+  `src/Web.cpp`). That would give bulk remote sizes in one fast call and let the
+  mirror drop the manifest for true stateless size-based diffing. Would require
+  building/flashing (or OTA) a fork.
+- **Firmware fork idea: stable battery gauge (state-based coulomb counting).**
+  Background (example setup): a LiFePO4 pack (3.2 V / 6000 mAh, protected;
+  charge end 3.65 V), indicator sliders set to 2.9 V (one LED) / 3.3 V (all
+  LEDs) / 3.0 V (warning) — correct for the chemistry. The encoder-click LED
+  gauge jumps randomly (20–24 of 24 LEDs at nominally 93 %) because
+  `Animation_BatteryMeasurement` (`src/Led.cpp`) takes a fresh unfiltered
+  voltage reading per click and maps it linearly (`Battery_EstimateLevel`,
+  `src/BatteryMeasureVoltage.cpp`): with a 0.4 V window one LED ≈ 17 mV, while
+  load transients (Wi-Fi, SD, the lit ring itself) move the voltage 30–70 mV;
+  on the flat LiFePO4 plateau (3.2–3.3 V covers ~20–90 % SoC) voltage says
+  almost nothing anyway. The web UI's "Zeitabstand der Messung" only drives the
+  cyclic warning/MQTT check (`Battery_Cyclic`), not the click gauge. Planned
+  approach — voltage-anchored coulomb counting in software (how real fuel
+  gauges work, minus the current sensor):
+  - Per-state current table (deepsleep ~2–5 mA, idle+Wi-Fi ~70–100 mA, playback
+    ~130–200 mA, plus ~5–15 mA per lit LED); integrate `mAh += I(state)·Δt` in
+    `Battery_CyclicInner`; SoC = 1 − used/6000. Persist counter to NVS every
+    few minutes and on shutdown (flash wear).
+  - **Anchors fix drift** (voltage IS meaningful at the curve's ends): >3.4 V
+    sustained ⇒ charging; back-to-plateau after ≥3.4 V (or ≥3.4 V at boot) ⇒
+    reset SoC = 100 %. <3.0 V under light load ⇒ clamp ~10 % (the knee).
+    Even ±20 % table error ⇒ only ~3 % SoC drift per 10 h between anchors.
+  - Minimal version (80 % of the value): single average current + "hours since
+    full anchor" — monotone, reproducible display. Full version can
+    self-calibrate the table from counted mAh over a full→knee cycle.
+  - Sanity-clamp raw readings: observed live (2026-07-23) a stuck 10.42 V
+    reading that persisted until reboot — impossible for the cell AND beyond
+    the measurement chain's ~4.4 V full scale (300k/100k divider, ADC_0db,
+    GPIO 35 = ADC1), i.e. wedged ADC/driver state, not noise. The gauge must
+    reject values outside ~2.5–3.7 V instead of displaying them.
+  - New module behind the existing `Battery_EstimateLevel()` interface so LED
+    ring, web UI and MQTT pick it up unchanged. During charging only "charging"
+    can be shown (charge current unknown). Real per-cent accuracy would need a
+    fuel-gauge chip (LC709203/MAX17048) — hardware change, out of scope.

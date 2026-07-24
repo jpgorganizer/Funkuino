@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Thin wrapper: open the interactive card picker (scripts/cards.py -i).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/.venv/bin/python" "$DIR/scripts/cards.py" --interactive "$@"

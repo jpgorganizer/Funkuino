@@ -1,0 +1,180 @@
+<!doctype html>
+<!-- Funkuino Studio — single-page shell. DOM is populated by /static/app.js. -->
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Funkuino Studio</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="wordmark">
+    <span class="wave" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span><b>Funkuino</b> Studio</span>
+    <span class="sub">Mediathek &amp; Karten</span>
+  </div>
+  <span class="spacer"></span>
+  <div id="now-playing" class="now-playing" hidden></div>
+  <button id="device-chip" class="device-chip offline" title="Gerät anpingen">
+    <span class="led"></span>
+    <span id="device-chip-text">Gerät…</span>
+  </button>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="bibliothek" role="tab">Bibliothek</button>
+  <button class="tab" data-tab="agent" role="tab">Agent</button>
+  <button class="tab" data-tab="sync" role="tab">Sync<span id="sync-tab-spin" class="tab-spin" hidden aria-hidden="true"></span></button>
+  <button class="tab" data-tab="karten" role="tab">Kartendruck</button>
+</nav>
+
+<div id="rfid-banner" class="rfid-banner" hidden></div>
+
+<main>
+  <!-- ================= Bibliothek ================= -->
+  <section id="tab-bibliothek" class="tabpane active" role="tabpanel">
+    <div class="lib-toolbar">
+      <input id="lib-search" class="input lib-search" type="search" placeholder="Titel oder Serie suchen…" autocomplete="off">
+      <button id="lib-refresh" class="btn" title="Bibliothek neu einlesen">Aktualisieren</button>
+      <span class="lib-dl">
+        <input id="lib-url" class="input" type="url" placeholder="URL zum Laden…" autocomplete="off">
+        <button id="lib-load" class="btn primary">Laden</button>
+      </span>
+      <span class="spacer"></span>
+      <span id="lib-totals" class="lib-totals"></span>
+    </div>
+    <div id="intake-strips" class="intake-strips"></div>
+    <div id="lib-body"></div>
+  </section>
+
+  <!-- ================= Agent ================= -->
+  <section id="tab-agent" class="tabpane" role="tabpanel">
+    <div id="agent-unavailable" class="agent-hint" hidden>
+      <div class="big">Agent nicht verfügbar</div>
+      <div id="agent-unavailable-msg">Der Claude-Agent ist derzeit nicht erreichbar.</div>
+    </div>
+
+    <div id="agent-live" class="agent-grid" hidden>
+      <aside class="agent-side">
+        <div class="panel panel-pad">
+          <button id="agent-new" class="btn primary">Neue Session</button>
+          <div>
+            <div class="field-label">Modell</div>
+            <select id="agent-model" class="input" style="width:100%">
+              <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
+            </select>
+          </div>
+          <div>
+            <div class="field-label">URL-Intake</div>
+            <div class="row" style="display:flex;gap:6px;margin-top:4px">
+              <input id="agent-url" class="input" style="flex:1;min-width:0" type="url" placeholder="https://…">
+              <button id="agent-url-go" class="btn">Los</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel panel-pad" style="flex:1">
+          <div class="field-label">Sessions</div>
+          <div id="session-list" class="session-list"></div>
+          <div id="session-empty" class="subtle" style="font-size:12px">Noch keine Session.</div>
+        </div>
+      </aside>
+
+      <div class="panel panel-pad agent-main">
+        <div id="transcripts" class="transcript"></div>
+        <div id="transcript-placeholder" class="empty">Neue Session starten oder eine URL einfügen.</div>
+
+        <div class="agent-input">
+          <textarea id="agent-text" class="input" placeholder="Nachricht an den Agenten… (Enter sendet, Umschalt+Enter für Zeilenumbruch)"></textarea>
+          <div class="row">
+            <button id="agent-send" class="btn primary">Senden</button>
+            <button id="agent-stop" class="btn danger" hidden>Stopp</button>
+            <span class="spacer"></span>
+            <span id="agent-status" class="status-line"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Sync ================= -->
+  <section id="tab-sync" class="tabpane" role="tabpanel">
+    <div class="two-col">
+      <div class="panel panel-pad">
+        <h2 class="section-title">Gerät</h2>
+        <dl id="device-info" class="kv"></dl>
+        <div class="btn-row" style="margin-top:14px">
+          <button id="device-ping" class="btn">Ping</button>
+        </div>
+      </div>
+      <div class="panel panel-pad">
+        <h2 class="section-title">Spiegeln</h2>
+        <p class="subtle" style="margin:4px 0 12px">Lädt neue und geänderte Dateien aus <span class="mono">files/</span> auf das Gerät.</p>
+        <div class="btn-row">
+          <button id="sync-dry" class="btn" title="Vorschau ohne Änderung – zeigt auch, was gelöscht würde">Dry-Run</button>
+          <button id="sync-run" class="btn primary">Sync</button>
+          <button id="sync-del" class="btn danger">Sync mit Löschen</button>
+        </div>
+        <div id="sync-stats" class="stats-line"></div>
+        <div id="sync-log" class="logpane" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Karten ================= -->
+  <section id="tab-karten" class="tabpane" role="tabpanel">
+    <div class="cards-head panel panel-pad">
+      <div id="cards-backlog" class="backlog">
+        <div class="backlog-line">
+          <span class="backlog-num" id="backlog-num">–</span>
+          <span class="backlog-word" id="backlog-word">Cover im Rückstau</span>
+        </div>
+        <div class="backlog-meter" aria-hidden="true"><span id="backlog-fill"></span></div>
+        <div class="backlog-cap" id="backlog-cap"></div>
+      </div>
+      <div class="btn-row cards-head-actions">
+        <button id="cards-print" class="btn primary">Drucken (neue)</button>
+        <button id="cards-dry" class="btn">Dry-Run</button>
+        <button id="cards-undo" class="btn">Rückgängig</button>
+      </div>
+    </div>
+
+    <div class="picker-bar">
+      <div class="picker-count"><b id="pick-count">0</b> / <span id="pick-per">12</span> für die nächste Seite</div>
+      <span class="spacer"></span>
+      <button id="pick-clear" class="btn" disabled>Auswahl leeren</button>
+      <button id="pick-render" class="btn primary" disabled>Seite erzeugen</button>
+    </div>
+
+    <div id="cards-grid" class="cards-grid"></div>
+
+    <details class="cards-output">
+      <summary>Druck-Ausgabe</summary>
+      <div id="cards-log" class="logpane" style="margin-top:10px"></div>
+    </details>
+  </section>
+</main>
+
+<div id="print-bar" class="print-bar" hidden>
+  <span id="print-bar-count" class="pb-count"></span>
+  <span class="spacer"></span>
+  <button id="print-bar-go" class="btn primary">Drucken</button>
+  <button id="print-bar-clear" class="in-dismiss" title="Auswahl leeren">×</button>
+</div>
+
+<dialog id="unassign-dialog" class="mini-dialog">
+  <div class="md-head">
+    <div class="md-title" id="unassign-title">Zuordnung aufheben</div>
+    <button id="unassign-close" class="in-dismiss" title="Schließen">×</button>
+  </div>
+  <div id="unassign-body" class="md-body"></div>
+</dialog>
+
+<div id="mode-popover" class="mode-popover" hidden></div>
+
+<div id="toasts" class="toast-wrap" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
