@@ -198,11 +198,6 @@ def main(argv: list[str] | None = None) -> int:
                         help="Revert the most recent run: its covers count as new "
                              "again and its auto-generated sheet is removed. Repeat "
                              "to step further back. Then exit.")
-    parser.add_argument("-i", "--interactive", action="store_true",
-                        help="Open a browser UI: pick covers (newest first, printed "
-                             "ones marked) onto a page; a full page auto-prints.")
-    parser.add_argument("--port", type=int, default=8765,
-                        help="Port for the --interactive web UI")
     parser.add_argument("--cols", type=int, default=DEFAULT_COLS,
                         help="Cards per row")
     parser.add_argument("--card-cm", type=float, default=DEFAULT_CARD_CM,
@@ -252,12 +247,6 @@ def main(argv: list[str] | None = None) -> int:
     if not root.exists():
         print(f"ERROR: not found: {root}", file=sys.stderr)
         return 1
-
-    if args.interactive:
-        import cards_ui
-        return cards_ui.serve(root, covers_dir, state, args.card_cm, args.cols,
-                              marks=not args.no_marks, trim=not args.no_trim,
-                              port=args.port)
 
     all_covers = collect_covers(root)
     if not all_covers:

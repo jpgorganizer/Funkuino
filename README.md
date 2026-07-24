@@ -39,11 +39,10 @@ command-line tools plus one local web app that ties them together.
   the margins. Print, stick an RFID tag on each card's back, laminate, cut. A
   print manifest makes a bare `./cards` mean "everything new since last time",
   with stackable `--undo`.
-- **`./cards-ui` — visual card picker.** A localhost web app showing every
-  cover as a thumbnail (newest first, printed ones greyed out); hand-pick
-  covers onto a sheet, or one-click the oldest full page.
 - **`./studio` — Funkuino Studio.** One local web app for the whole workflow
-  (see below).
+  (see below), including a visual card picker: every cover as a thumbnail
+  (newest first, printed ones greyed out), hand-pick covers onto a sheet or
+  one-click the oldest full page.
 
 ## Funkuino Studio
 

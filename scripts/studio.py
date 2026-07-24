@@ -67,7 +67,7 @@ PLACEHOLDER = ("Studio frontend missing (scripts/studio_web/index.html). "
 
 
 def _creation_ts(st) -> float:
-    """Best creation timestamp: macOS st_birthtime, else mtime (like cards_ui)."""
+    """Best creation timestamp: macOS st_birthtime, else mtime."""
     return getattr(st, "st_birthtime", None) or st.st_mtime
 
 
@@ -683,8 +683,8 @@ class Studio:
         return web.json_response(data)
 
     def _cards_covers(self) -> dict:
-        """All covers with printed status, newest st_birthtime first (like
-        cards_ui), plus perPage and the last print run."""
+        """All covers with printed status, newest st_birthtime first, plus
+        perPage and the last print run."""
         covers_dir = espuino.DEFAULT_COVERS_DIR
         state = PrintState.load(cards.STATE_FILE)
         _, per_page = cards.page_grid(cards.DEFAULT_CARD_CM, cards.DEFAULT_COLS)
@@ -737,7 +737,7 @@ class Studio:
 
     def _render_sheet(self, rels: list[str]) -> dict:
         """Render chosen covers to a fresh PDF and mark them printed -- identical
-        behaviour to ./cards / cards_ui (same defaults) so ./cards --undo reverts it."""
+        behaviour to ./cards (same defaults) so ./cards --undo reverts it."""
         covers_dir = espuino.DEFAULT_COVERS_DIR
         covers = [covers_dir / r for r in rels]
         missing = [p for p in covers if not p.exists()]

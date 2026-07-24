@@ -33,7 +33,6 @@ Funkuino/
   prepare               # wrapper: merge a folder of tracks into one audiobook
   covers                # wrapper: extract title images into card-covers/
   cards                 # wrapper: lay out card-covers/ into printable PDFs
-  cards-ui              # wrapper: interactive browser card picker (cards.py -i)
   studio                # wrapper: Funkuino Studio web app (dashboard + agent)
   scripts/
     espuino.py          # HTTP API client + device quirks (the knowledge lives here)
@@ -43,7 +42,6 @@ Funkuino/
     prepare.py          # concat + spoken intro (Hörspiel merge)
     covers.py           # extract embedded covers -> card-covers/
     cards.py            # compose printable A4 card sheets from card-covers/
-    cards_ui.py         # localhost web app for interactive card picking (cards -i)
     print_state.py      # manifest of already-printed covers
     studio.py           # Studio: aiohttp server, WS hub, sync/cards jobs
     studio_state.py     # Studio: library scan -> per-card pipeline status
@@ -230,29 +228,14 @@ cut it into square cards.
 ./cards --no-mark           # make a PDF but leave the manifest untouched
 ./cards --undo              # revert the last run: its covers are "new" again
 ./cards --reset ["subpath"] # forget print history -> those covers are "new" again
-./cards-ui                  # same, via its own wrapper (easier to find)
 ```
 
-**Interactive mode (`./cards-ui`, = `./cards -i`, `scripts/cards_ui.py`).** Where
-a plain `./cards` decides *for* you (everything new), this opens a small localhost web
-app to hand-pick exactly which covers land on one sheet — the whole point is to
-*see* the title images, which only an image grid can do. It shows every cover as
-a thumbnail (same trim/square-crop as the print), **newest first by creation
-date** (`st_birthtime`), with already-printed ones greyed and badged. Clicking a
-cover adds it (each gets its selection-order number); a counter tracks `N /
-<per_page>` (12 by default, follows `--cols`/`--card-cm`). Filling the page
-auto-renders the PDF and marks those covers printed; a "Seite erzeugen" button
-renders a partial page early. Two shortcut buttons bridge back to the plain
-`./cards` behaviour: **"Älteste N drucken"** (shown only when ≥ one full page of
-unprinted covers is waiting) one-clicks the oldest full page — the FIFO backlog —
-laid out sorted by path like `./cards`; **"Letzten Druck rückgängig"** does
-`./cards --undo` (revert the manifest, delete the tool's own sheet), and
-**hovering it spotlights exactly which printed cards that undo would revert** (the
-rest fade, the affected ones ring red) — correlated by the manifest's NFC key so
-it works regardless of macOS NFD/NFC filename form. It reuses
+**Interactive picking lives in Studio.** Hand-picking covers onto a sheet (with
+thumbnails, newest first, printed ones greyed/badged, backlog shortcut, undo
+with hover-spotlight) is the **Kartendruck** tab of `./studio`. It reuses
 `render_pages`/`save_pdf`/`PrintState` from cards.py verbatim, so its sheets are
-identical to `./cards`' and revert with the same `./cards --undo`. `--port` changes the port (default 8765); the `path`
-subpath filter and `--no-marks`/`--no-trim` apply as usual.
+identical to `./cards`' and revert with the same `./cards --undo`. (A separate
+`./cards-ui` wrapper existed before Studio integrated it and was removed.)
 
 **Full pages only.** You can only laminate whole A4 sheets, so a run whose last
 page is partial (e.g. 10/12 cards) prints a `NOTE:` saying how many more covers
