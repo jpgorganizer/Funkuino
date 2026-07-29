@@ -1781,7 +1781,15 @@ function initScrollShadow() {
   onScroll();
 }
 
+/** The native shell loads us with ?shell=mac; the stylesheet then makes the
+ *  header double as the window's title bar (see .app-header). */
+function initShell() {
+  const shell = new URLSearchParams(location.search).get("shell");
+  if (shell) document.documentElement.dataset.shell = shell;
+}
+
 function init() {
+  initShell();
   initTabs();
   initLibrary();
   initSyncCards();

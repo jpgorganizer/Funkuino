@@ -87,6 +87,17 @@ a { color: var(--accent); }
   z-index: 40;
 }
 
+/* Inside Funkuino.app the window has no title bar of its own (it would repeat
+   the wordmark), so the page starts at the very top and the traffic lights
+   float above this header. Leave them room, and shift the wordmark clear of
+   them — the header band then reads as the window's title bar. */
+html[data-shell="mac"] .app-header {
+  padding-top: 34px;
+}
+html[data-shell="mac"] .wordmark {
+  margin-left: 4px;
+}
+
 .wordmark {
   display: flex;
   align-items: baseline;

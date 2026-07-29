@@ -153,7 +153,9 @@ struct RootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .running(let url):
-            StudioWebView(url: url)
+            // ?shell=mac tells the page it is inside this window, so its header
+            // can take over the role of the (hidden) title bar.
+            StudioWebView(url: URL(string: "?shell=mac", relativeTo: url) ?? url)
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -206,6 +208,10 @@ struct FunkuinoApp: App {
                     server.start()
                 }
         }
+        // No native title bar: it would show "Funkuino Studio" directly above the
+        // page's own wordmark. The window's content now runs to the top edge and
+        // the page header is the title bar; the traffic lights float over it.
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 800)
     }
 }
