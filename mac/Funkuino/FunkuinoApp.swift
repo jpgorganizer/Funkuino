@@ -143,8 +143,15 @@ final class DragHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Hands the live web view to the menu commands (there is no other way to reach
+/// it from the App's scene, and without it Cmd-R would just beep).
+final class WebViewBox: ObservableObject {
+    weak var view: WKWebView?
+}
+
 struct StudioWebView: NSViewRepresentable {
     let url: URL
+    let box: WebViewBox
 
     func makeCoordinator() -> DragHandler { DragHandler() }
 
@@ -153,6 +160,7 @@ struct StudioWebView: NSViewRepresentable {
         config.userContentController.add(context.coordinator, name: "shellDrag")
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.webView = view
+        box.view = view
         view.load(URLRequest(url: url))
         // .windowStyle(.hiddenTitleBar) alone only hides the title: the window
         // still reserves the title bar's height, which showed as a white strip
@@ -176,6 +184,7 @@ struct StudioWebView: NSViewRepresentable {
 
 struct RootView: View {
     @EnvironmentObject var server: StudioServer
+    @EnvironmentObject var web: WebViewBox
 
     var body: some View {
         switch server.state {
@@ -190,7 +199,7 @@ struct RootView: View {
             // can take over the role of the (hidden) title bar. ignoresSafeArea
             // is what actually lets it reach the top edge — SwiftUI insets the
             // content by the title bar height otherwise, hidden or not.
-            StudioWebView(url: URL(string: "?shell=mac", relativeTo: url) ?? url)
+            StudioWebView(url: URL(string: "?shell=mac", relativeTo: url) ?? url, box: web)
                 .ignoresSafeArea()
         case .failed(let message):
             VStack(spacing: 12) {
@@ -233,11 +242,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct FunkuinoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var server = StudioServer()
+    @StateObject private var web = WebViewBox()
 
     var body: some Scene {
         WindowGroup("Funkuino Studio") {
             RootView()
                 .environmentObject(server)
+                .environmentObject(web)
                 .frame(minWidth: 900, minHeight: 620)
                 .onAppear {
                     delegate.server = server
@@ -249,5 +260,12 @@ struct FunkuinoApp: App {
         // the page header is the title bar; the traffic lights float over it.
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 800)
+        .commands {
+            // Without a browser's chrome there is no reload; Cmd-R would beep.
+            CommandGroup(after: .toolbar) {
+                Button("Neu laden") { web.view?.reload() }
+                    .keyboardShortcut("r", modifiers: .command)
+            }
+        }
     }
 }

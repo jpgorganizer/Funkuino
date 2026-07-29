@@ -7,7 +7,9 @@ driven from scripts instead of clicking through the web interface.
 The primary users are German-speaking (the Studio UI and the embedded agent
 talk German); **code and documentation stay in English.**
 
-Single-maintainer repo: **commit straight to `main`**, no feature branches.
+Single-maintainer repo: **commit straight to `main`**, no feature branches. Keep
+the history clean — while iterating on feedback about a change, **amend** its
+commit instead of stacking "fix the fix" commits on top.
 
 ## The device
 

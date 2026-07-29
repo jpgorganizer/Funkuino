@@ -477,7 +477,21 @@ function cardCell(unit) {
   return el("td", { class: "col-pipe" }, box);
 }
 
+/** Both library tables share these widths. The column heads live in their own
+ *  table above the scroller (so the scrollbar starts at the first row and the
+ *  head's bottom border cannot scroll away), which only lines up with the rows
+ *  if both use `table-layout: fixed` and the same columns. */
+function libColgroup() {
+  // Thumb column: the 44px image plus its 14px left padding — with a fixed
+  // layout the column no longer grows to fit them and the cover would collide
+  // with the title.
+  const cols = [56, 56, 56, 56, 56, 58, null, 40];
+  return el("colgroup", null, ...cols.map(w =>
+    el("col", w === null ? null : { style: `width:${w}px` })));
+}
+
 function renderLibrary() {
+  const head = $("#lib-head");
   const body = $("#lib-body");
   const s = State.data;
   const units = (s && s.units) || [];
@@ -497,6 +511,7 @@ function renderLibrary() {
     ((u.title || "") + " " + (u.series || "") + " " + (u.id || "")).toLowerCase().includes(q)) : units;
 
   body.replaceChildren();
+  head.replaceChildren();
   if (!units.length) {
     body.append(el("div", { class: "empty", text: "Die Bibliothek ist leer. Lade Titel mit dem Agenten oder ./download." }));
     return;
@@ -522,8 +537,9 @@ function renderLibrary() {
 
   // Row order (per user feedback): status block LEFT, then thumbnail, then title.
   const syncHost = (s && s.syncManifest && s.syncManifest.host) || "";
-  const table = el("table", { class: "lib-table" });
-  table.append(el("thead", null, el("tr", null,
+  const headTable = el("table", { class: "lib-table" });
+  headTable.append(libColgroup());
+  headTable.append(el("thead", null, el("tr", null,
     el("th", { class: "col-pipe", text: "Down", title: "Audio heruntergeladen" }),
     el("th", { class: "col-pipe", text: "Cover", title: "Titelbild für die Karte" }),
     el("th", { class: "col-pipe", text: "Sync", title: syncHost ? "Gerät: " + syncHost : "Auf dem Gerät" }),
@@ -532,6 +548,10 @@ function renderLibrary() {
     el("th", { class: "col-thumb", text: "Titel", colspan: "2" }),
     el("th", { class: "col-play" }),
   )));
+  head.append(headTable);
+
+  const table = el("table", { class: "lib-table" });
+  table.append(libColgroup());
   // "active" = the device has a loaded track, playing OR paused (backend sends a
   // paused track as playing:false + pausePlay:true; stopped clears both).
   const pl = State.player;
@@ -1568,7 +1588,6 @@ function showRfidBanner(known, id, title) {
   bar.append(el("span", { class: "rb-icon", text: known ? "🏷" : "✨" }), text,
     el("span", { class: "spacer" }), dismiss);
   bar.hidden = false;
-  document.documentElement.style.setProperty("--banner-h", (bar.offsetHeight || 44) + "px");
   clearTimeout(RFID.bannerTimer ?? undefined);
   RFID.bannerTimer = setTimeout(clearActiveCard, 60000);
 }
@@ -1578,7 +1597,6 @@ function clearActiveCard() {
   RFID.pendingMode.clear();
   const b = $("#rfid-banner");
   if (b) b.hidden = true;
-  document.documentElement.style.setProperty("--banner-h", "0px");
   clearTimeout(RFID.bannerTimer ?? undefined);
   hideModePopover();
   renderLibrary();
@@ -1775,9 +1793,14 @@ function initRfid() {
 }
 
 // Show a shadow under the bottom sticky bar only once content scrolls beneath it.
+/** Shadow under the sticky table/picker heads once their pane is scrolled.
+ *  Bound to <main>, the page's only scroll container — the document itself
+ *  never scrolls (see the app layout block in style.css). */
 function initScrollShadow() {
-  const onScroll = () => document.body.classList.toggle("scrolled", window.scrollY > 4);
-  window.addEventListener("scroll", onScroll, { passive: true });
+  const pane = $("main");
+  if (!pane) return;
+  const onScroll = () => document.body.classList.toggle("scrolled", pane.scrollTop > 4);
+  pane.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 }
 

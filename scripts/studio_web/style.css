@@ -55,7 +55,18 @@
    display (flex/grid) — otherwise toggling `.hidden` in JS silently no-ops. */
 [hidden] { display: none !important; }
 
+/* App layout: header, tabs and banner are fixed furniture, only <main> scrolls.
+   Scrolling the whole document instead would run the scrollbar up beside the
+   header and carry the tab switcher out of view — and it forced every sticky
+   element inside to hardcode the furniture's height (top: 92px …), which broke
+   as soon as the header changed height (e.g. in the macOS app). */
+html { height: 100%; }
+
 body {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   margin: 0;
   font-family: var(--font-ui);
   font-size: 14px;
@@ -82,8 +93,7 @@ a { color: var(--accent); }
   padding: 14px 24px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);          /* fully opaque — no bleed-through */
-  position: sticky;
-  top: 0;
+  flex: none;
   z-index: 40;
 }
 
@@ -156,8 +166,7 @@ html[data-shell="mac"] .wordmark {
   padding: 0 24px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);          /* fully opaque */
-  position: sticky;
-  top: 55px;
+  flex: none;
   z-index: 35;
 }
 .tab {
@@ -173,9 +182,29 @@ html[data-shell="mac"] .wordmark {
 .tab:hover { color: var(--ink); }
 .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
 
-main { padding: 22px 24px 60px; max-width: 1180px; margin: 0 auto; }
+/* The only scroll container. min-height:0 lets it shrink below its content —
+   without it a flex item refuses to and the page grows a document scrollbar
+   again. */
+main { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .tabpane { display: none; }
-.tabpane.active { display: block; animation: fade .28s var(--ease); }
+
+/* Panes that own their scrolling: the pane fills the window exactly and only
+   its list scrolls, so the toolbar above the list stays put instead of sliding
+   away with the rows. <main> then has nothing left to scroll for these panes. */
+#tab-bibliothek.tabpane.active,
+#tab-karten.tabpane.active,
+#tab-agent.tabpane.active { display: flex; flex-direction: column; height: 100%; }
+.tabpane.active {
+  display: block;
+  animation: fade .28s var(--ease);
+  /* The width limit and page padding live here, not on <main>: the scroll
+     container has to span the window, otherwise the scrollbar floats somewhere
+     mid-window on a wide display. */
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 24px 28px;
+  min-height: 100%;
+}
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ---------- Generic panels + buttons ---------- */
@@ -222,6 +251,17 @@ main { padding: 22px 24px 60px; max-width: 1180px; margin: 0 auto; }
 
 /* ---------- Bibliothek ---------- */
 
+/* Furniture of the library pane; #lib-body is the scroller (see the pane rule
+   above). The column heads are their own table in #lib-head, above it: as part
+   of the scroller they would take the scrollbar's full height with them, and a
+   sticky head's bottom border does not paint reliably under border-collapse —
+   it scrolled away with the rows. Both tables need the same scrollbar gutter,
+   or the heads sit a scrollbar-width off from the rows. */
+.lib-toolbar, .intake-strips { flex: none; }
+#lib-head { flex: none; overflow: hidden; scrollbar-gutter: stable; }
+#lib-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.lib-table { table-layout: fixed; }
+
 .lib-toolbar {
   display: flex;
   align-items: center;
@@ -242,10 +282,9 @@ main { padding: 22px 24px 60px; max-width: 1180px; margin: 0 auto; }
   color: var(--ink-soft);                 /* raised contrast vs. the old faint */
   padding: 9px 6px;
   border-bottom: 2px solid var(--line);
-  position: sticky; top: calc(92px + var(--banner-h, 0px)); background: var(--paper); z-index: 20;
-  transition: box-shadow .2s var(--ease);
+  background: var(--paper);
 }
-body.scrolled .lib-table th { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35); }
+body.scrolled #lib-head { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35); }
 .lib-table th.col-pipe { text-align: center; width: 56px; padding: 9px 4px; }
 .lib-table th.col-thumb { padding-left: 14px; }
 .lib-table td { padding: 9px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
@@ -364,7 +403,8 @@ body.scrolled .lib-table th { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35
 
 /* ---------- Agent ---------- */
 
-.agent-grid { display: grid; grid-template-columns: 244px 1fr; gap: 18px; align-items: stretch; min-height: 60vh; }
+.agent-grid { display: grid; grid-template-columns: 244px 1fr; gap: 18px; align-items: stretch;
+  flex: 1; min-height: 0; }
 @media (max-width: 820px) { .agent-grid { grid-template-columns: 1fr; } }
 
 .agent-side { display: flex; flex-direction: column; gap: 12px; }
@@ -383,7 +423,7 @@ body.scrolled .lib-table th { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35
 .session-item .s-label { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-item .s-meta { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
 
-.agent-main { display: flex; flex-direction: column; min-height: 60vh; }
+.agent-main { display: flex; flex-direction: column; min-height: 0; }
 .transcript { flex: 1; overflow: auto; padding: 4px 2px 12px; display: flex; flex-direction: column; gap: 12px; }
 .transcript-holder { display: none; flex-direction: column; height: 100%; }
 .transcript-holder.active { display: flex; }
@@ -571,18 +611,23 @@ body.scrolled .lib-table th { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35
 
 /* ---------- Karten: header + picker grid ---------- */
 
-.cards-head { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+.cards-head { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; flex: none; }
 .cards-head .backlog { flex: 1 1 220px; margin-top: 0; }
 .cards-head-actions { flex: 0 0 auto; }
 
 .picker-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
-  position: sticky; top: calc(92px + var(--banner-h, 0px)); z-index: 20; padding: 8px 2px;
+  flex: none; z-index: 20; padding: 8px 2px;
   background: var(--paper); transition: box-shadow .2s var(--ease); }
 body.scrolled .picker-bar { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35); }
 .picker-count { font-size: 13px; color: var(--ink-soft); }
 .picker-count b { font-family: var(--font-display); font-size: 18px; color: var(--accent); }
 
-.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 12px; }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 12px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* Keep every row at its natural (square) height: as a height-constrained
+     flex item the grid would otherwise compress its rows, and the default
+     stretch alignment squashes the tiles' aspect-ratio flat. */
+  grid-auto-rows: max-content; align-content: start; align-items: start; }
 .cover-tile {
   position: relative; aspect-ratio: 1 / 1; border-radius: var(--radius); overflow: hidden;
   border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; padding: 0;
@@ -603,14 +648,14 @@ body.scrolled .picker-bar { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35);
   padding: 1px 6px; border-radius: 999px; background: color-mix(in oklch, var(--paper) 80%, transparent);
   color: var(--ink-soft); border: 1px solid var(--line);
 }
-.cards-output { margin-top: 20px; }
+.cards-output { margin-top: 20px; flex: none; }
 .cards-output summary { cursor: pointer; font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); padding: 4px 0; }
 .cards-output summary:hover { color: var(--ink); }
 
 /* ---------- RFID banner (sticky: it IS the assignment mode) ---------- */
 
 .rfid-banner {
-  position: sticky; top: 92px; z-index: 30;
+  flex: none; z-index: 30;
   display: flex; align-items: center; gap: 12px;
   padding: 11px 24px; border-bottom: 1px solid var(--line);
   animation: rbIn .28s var(--ease);
