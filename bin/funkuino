@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Funkuino command dispatcher: `funkuino <command> [args…]`.
+#
+# Why this exists rather than the plain ./sync, ./download … wrappers: the
+# Studio agent's permission rules are TEXT patterns matched against the Bash
+# command (studio_agent.py ALLOWED_TOOLS / ASK_RULES). Relative wrappers only
+# match while the agent's cwd is the checkout — in a packaged app the code sits
+# read-only inside the bundle and the data folder is elsewhere. Putting this
+# directory on PATH keeps the invocation a bare, canonical `funkuino sync …`
+# that the rules can match no matter where code and data live. A path handed to
+# the agent in an environment variable would NOT work: `$FUNKUINO_HOME/sync`,
+# "${FUNKUINO_HOME}/sync" and the expanded absolute path are all different
+# strings, so an ask rule would be one spelling away from being bypassed.
+#
+# A command <name> is `scripts/<name>.py`, so an extension only has to drop its
+# script there (the private overlay's topic.py does exactly that).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="$ROOT/.venv/bin/python"
+
+# Support modules, not commands.
+INTERNAL=" espuino sync_state print_state studio_state studio_agent progress "
+
+usage() {
+    echo "Usage: funkuino <command> [args…]" >&2
+    echo >&2
+    echo "Commands:" >&2
+    for script in "$ROOT"/scripts/*.py; do
+        name="$(basename "$script" .py)"
+        [[ "$INTERNAL" == *" $name "* ]] || echo "  $name" >&2
+    done
+    echo "  python              # the project venv's interpreter" >&2
+}
+
+[[ $# -ge 1 ]] || { usage; exit 2; }
+
+cmd="$1"; shift
+case "$cmd" in
+    -h|--help|help) usage; exit 0 ;;
+    python)
+        # The project venv's interpreter (yt-dlp, mutagen probes, ad-hoc
+        # regroup/merge scripts). Exposed here because `.venv/bin/python` is
+        # relative to the checkout, which is not where callers necessarily are.
+        [[ -x "$PY" ]] || { echo "Project venv missing at $PY" >&2; exit 1; }
+        exec env PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" "$PY" "$@" ;;
+esac
+
+script="$ROOT/scripts/$cmd.py"
+if [[ "$INTERNAL" == *" $cmd "* || ! -f "$script" ]]; then
+    echo "funkuino: unknown command '$cmd'" >&2
+    usage
+    exit 2
+fi
+
+if [[ ! -x "$PY" ]]; then
+    echo "Project venv missing. Create it with:" >&2
+    echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+# Extension scripts are typically symlinks into a separate checkout; Python
+# resolves the real path and would look for the sibling imports (espuino,
+# download, …) next to the target. Point it at the real scripts/ directory.
+exec env PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" "$PY" "$script" "$@"

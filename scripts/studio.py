@@ -28,6 +28,7 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -640,14 +641,14 @@ class Studio:
             await self.rescan()
             self.emit({"t": "state.changed"})
 
-    # -- cards jobs (shell out to the repo wrappers) --
+    # -- cards jobs (shell out to the dispatcher, bin/funkuino) --
     async def h_cards_print(self, request: web.Request) -> web.Response:
         body = await _json_body(request)
-        argv = ["./cards", "--dry-run"] if body.get("dryRun") else ["./cards"]
-        return await self._start_cards(argv)
+        return await self._start_cards(["cards", "--dry-run"] if body.get("dryRun")
+                                       else ["cards"])
 
     async def h_cards_undo(self, request: web.Request) -> web.Response:
-        return await self._start_cards(["./cards", "--undo"])
+        return await self._start_cards(["cards", "--undo"])
 
     async def _start_cards(self, argv: list[str]) -> web.Response:
         if self.cards_running:
@@ -660,8 +661,10 @@ class Studio:
     async def _run_cards(self, argv: list[str]) -> None:
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(espuino.REPO_ROOT / argv[0].lstrip("./")), *argv[1:],
-                cwd=str(espuino.REPO_ROOT),
+                str(espuino.REPO_ROOT / "bin" / "funkuino"), *argv,
+                cwd=str(espuino.DATA_ROOT),
+                # Resolved once here so the child does not re-read the config.
+                env={**os.environ, "FUNKUINO_DATA_DIR": str(espuino.DATA_ROOT)},
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT)
             assert proc.stdout is not None
@@ -749,7 +752,7 @@ class Studio:
 
         pages = cards.render_pages(covers, cards.DEFAULT_CARD_CM, cards.DEFAULT_COLS,
                                    marks=True, trim=True, log=log)
-        out = (espuino.REPO_ROOT / "print-sheets"
+        out = (espuino.PRINT_SHEETS_DIR
                / f"cards-{time.strftime('%Y%m%d-%H%M%S')}.pdf")
         cards.save_pdf(pages, out)
         state = PrintState.load(cards.STATE_FILE)
@@ -1066,7 +1069,7 @@ class Studio:
             self.token, self.emit_agent, self.loop,
             sync_active=lambda: self.sync_running)
         self._ws_session = aiohttp.ClientSession()
-        for stale in espuino.REPO_ROOT.glob(".studio-progress-*"):
+        for stale in espuino.DATA_ROOT.glob(".studio-progress-*"):
             with contextlib.suppress(OSError):
                 stale.unlink()  # leftovers from a previous run
         await self.rescan()
@@ -1162,10 +1165,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Do not open a browser tab on start")
     args = parser.parse_args(argv)
 
-    token = parse_env(espuino.REPO_ROOT / ".env").get("SDK_TOKEN")
+    token = parse_env(espuino.data_or_repo(".env")).get("SDK_TOKEN")
     if token:
         # So the Agent SDK subprocess inherits it even if not passed explicitly.
-        import os
         os.environ.setdefault("CLAUDE_CODE_OAUTH_TOKEN", token)
 
     cfg = espuino.Config.from_env(host=args.host)

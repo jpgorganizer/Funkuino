@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,10 +33,22 @@ from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions,
                               ToolUseBlock, UserMessage)
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
+# The command dispatcher (bin/funkuino). Sessions get its directory on PATH, so
+# the agent calls `funkuino <command>` — one canonical spelling that the
+# permission patterns below can match regardless of cwd, which the ./ wrappers
+# cannot once code and data live in different places (packaged app).
+DISPATCHER = "funkuino"
+BIN_DIR = espuino.REPO_ROOT / "bin"
+
 # Bare allowlist: these are auto-approved deterministically (no classifier
 # round-trip, no card). The risky set lives in ASK_RULES instead.
 ALLOWED_TOOLS = [
     "Read", "Glob", "Grep", "TodoWrite",
+    # The dispatcher form (bin/ is on the session PATH) is what the agent is
+    # told to use; the ./ wrappers stay allowed because a checkout still has
+    # them and the agent may fall back to a form it saw in a shell transcript.
+    "Bash(funkuino download*)", "Bash(funkuino prepare*)",
+    "Bash(funkuino covers*)",
     "Bash(./download*)", "Bash(./prepare*)",
     "Bash(./covers*)",
     "Bash(ffmpeg*)", "Bash(ffprobe*)", "Bash(ls*)", "Bash(mkdir*)", "Bash(mv*)",
@@ -46,7 +59,9 @@ ALLOWED_TOOLS = [
     # The venv python is the workhorse (yt-dlp, mutagen probes, JSON parsing of
     # playlist metadata). Inline `-c` is arbitrary code, but the user opted for
     # auto mode anyway — a deterministic allow beats a per-call classifier trip.
-    "Bash(.venv/bin/python*)",
+    # Same reasoning as the wrappers: `funkuino python` is the cwd-independent
+    # spelling, the relative one stays allowed for a checkout.
+    "Bash(funkuino python*)", "Bash(.venv/bin/python*)",
 ]
 
 # Machine-local allowlist extensions: a git-ignored `.agent-allow.json` at the
@@ -55,7 +70,7 @@ ALLOWED_TOOLS = [
 try:
     ALLOWED_TOOLS += [
         str(p) for p in
-        json.loads((espuino.REPO_ROOT / ".agent-allow.json").read_text())
+        json.loads(espuino.data_or_repo(".agent-allow.json").read_text())
     ]
 except (OSError, ValueError):
     pass
@@ -68,8 +83,10 @@ except (OSError, ValueError):
 # question cards only work because can_use_tool fires for that tool.
 ASK_RULES = [
     "AskUserQuestion",
-    "Bash(./sync*)",        # real upload + full device listing (device lock!)
-    "Bash(./cards*)",       # a real print mutates the print manifest
+    # Both spellings, deliberately: missing one here does not fail loudly, it
+    # silently hands the call to the auto-mode classifier, which never asks.
+    "Bash(funkuino sync*)", "Bash(./sync*)",   # upload + full device listing
+    "Bash(funkuino cards*)", "Bash(./cards*)",  # a real print mutates the manifest
     "Bash(rm*)", "Bash(rmdir*)", "Bash(sudo*)",
     "Bash(git push*)",
 ]
@@ -79,24 +96,39 @@ SETTINGS_JSON = json.dumps({"permissions": {"ask": ASK_RULES}})
 
 # Appended to the claude_code preset system prompt.
 SYSTEM_APPEND = (
-    "You are running inside Funkuino Studio. Never run "
-    "`source .venv/bin/activate`; call `.venv/bin/python` directly. Never run a "
-    "bare `./sync` (a real upload to the device) unless the user explicitly asks "
-    "for it. rm, sudo, git push, ./sync and ./cards always interrupt the user "
+    "You are running inside Funkuino Studio. The project's commands are on your "
+    "PATH as `funkuino <command>` (download, prepare, covers, sync, cards, plus "
+    "any locally installed ones) — always use that form, never the ./ wrappers "
+    "or an absolute path, because your working directory is the DATA folder and "
+    "need not contain them. For Python use `funkuino python …` (the project "
+    "venv, with the scripts importable); never `source .venv/bin/activate` and "
+    "never a bare `python`. Never run a bare `funkuino sync` (a real "
+    "upload to the device) unless the user explicitly asks for it. rm, sudo, "
+    "git push, `funkuino sync` and `funkuino cards` always interrupt the user "
     "for approval — avoid them unless genuinely needed."
 )
 
 
 def _system_append() -> str:
-    """SYSTEM_APPEND plus machine-local agent knowledge: a git-ignored
-    ``CLAUDE.local.md`` at the repo root is appended verbatim, so local tooling
-    additions reach the agent without touching the repo's CLAUDE.md
-    (``setting_sources=["project"]`` only loads the latter)."""
-    try:
-        extra = (espuino.REPO_ROOT / "CLAUDE.local.md").read_text()
-    except OSError:
-        return SYSTEM_APPEND
-    return SYSTEM_APPEND + "\n\n" + extra
+    """SYSTEM_APPEND plus the project instructions the session needs.
+
+    ``setting_sources=["project"]`` loads a CLAUDE.md from the session's cwd,
+    which is DATA_ROOT — fine for a plain checkout (data == code), but with a
+    configured data folder (and in a packaged app, where the code sits read-only
+    inside the bundle) there is no CLAUDE.md there. So the code root's CLAUDE.md
+    is appended explicitly in that case; the data folder may still add its own,
+    which the project source picks up on top.
+
+    A git-ignored ``CLAUDE.local.md`` is appended either way — machine-local
+    tooling knowledge that must not touch the repo's CLAUDE.md.
+    """
+    parts = [SYSTEM_APPEND]
+    if espuino.DATA_ROOT != espuino.REPO_ROOT:
+        with contextlib.suppress(OSError):
+            parts.append((espuino.REPO_ROOT / "CLAUDE.md").read_text())
+    with contextlib.suppress(OSError):
+        parts.append(espuino.data_or_repo("CLAUDE.local.md").read_text())
+    return "\n\n".join(parts)
 # ./sync (even --dry-run) is deliberately NOT allowlisted: it does the full
 # recursive device listing outside Studio's device_lock, which would violate the
 # one-storage-op-at-a-time rule. Agent ./sync calls are routed to a UI approval,
@@ -112,11 +144,12 @@ renames/regrouping (multi-story Folgen per the documented convention).
 When a judgment call is needed (classification unclear, naming/attribution \
 choices, Folge number, intro wording), ask the user with the AskUserQuestion \
 tool -- questions and options in GERMAN.
-Do NOT run a real ./sync or ./cards print unless the user approves; you may \
+Do NOT run a real `funkuino sync` or `funkuino cards` print unless the user \
+approves; you may \
 suggest it at the end. Report a concise German summary of what landed where.
 Communicate with the user in German."""
 
-CHAT_PREFIX = ("[Running inside Funkuino Studio (repo at {root}). "
+CHAT_PREFIX = ("[Running inside Funkuino Studio (data folder at {root}). "
                "Answer in German.]\n\n")
 
 
@@ -150,13 +183,24 @@ def _summarize_result(block: ToolResultBlock) -> str:
 
 def _bash_head(command: str) -> str:
     """The executable/wrapper a Bash command runs (its first token), e.g.
-    ``./sync`` or ``touch``. Falls back to the raw command if it can't split."""
+    ``./sync`` or ``touch``. Falls back to the raw command if it can't split.
+
+    Exception: for the dispatcher the risk lives in the SUBcommand, so
+    ``funkuino sync …`` yields ``funkuino sync``, normalised to the basename so
+    an absolute invocation compares equal. Without this, an "always allow" on a
+    harmless ``funkuino covers`` would key on ``funkuino`` alone and thereby
+    also always-allow ``funkuino sync``.
+    """
     try:
         import shlex
         parts = shlex.split(command)
     except ValueError:
         parts = command.split()
-    return parts[0] if parts else command.strip()
+    if not parts:
+        return command.strip()
+    if Path(parts[0]).name == DISPATCHER and len(parts) > 1:
+        return f"{DISPATCHER} {parts[1]}"
+    return parts[0]
 
 
 def _pattern_for(tool_name: str, data: dict) -> str:
@@ -225,10 +269,11 @@ class Session:
             return PermissionResultAllow(
                 updated_input={"questions": questions, "answers": answers})
 
-        # ./sync while Studio already holds the device: auto-deny (a concurrent
+        # A sync while Studio already holds the device: auto-deny (a concurrent
         # device listing would wedge the SD writer) without a UI round-trip.
         if (tool_name == "Bash"
-                and _bash_head(str(input_data.get("command", ""))) == "./sync"
+                and _bash_head(str(input_data.get("command", "")))
+                in (f"{DISPATCHER} sync", "./sync")
                 and self.manager.sync_active()):
             return PermissionResultDeny(message="Sync läuft bereits")
 
@@ -352,12 +397,24 @@ class SessionManager:
 
     def _options(self, model: str, can_use_tool,
                  progress_file: Path | None = None) -> ClaudeAgentOptions:
-        env = {"CLAUDE_CODE_OAUTH_TOKEN": self.token}
+        env = {
+            "CLAUDE_CODE_OAUTH_TOKEN": self.token,
+            # Makes the bare `funkuino …` form resolvable from any cwd. Prepended,
+            # so a shell profile that appends its own entries cannot shadow it;
+            # if a profile overwrites PATH wholesale the agent fails loudly with
+            # "command not found" rather than quietly finding something else.
+            "PATH": f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}",
+            # Resolve the data folder once here instead of letting every child
+            # process re-read the config file.
+            "FUNKUINO_DATA_DIR": str(espuino.DATA_ROOT),
+        }
         if progress_file is not None:
             # ./download (and wrappers built on it) writes live progress here.
             env["FUNKUINO_PROGRESS_FILE"] = str(progress_file)
         return ClaudeAgentOptions(
-            cwd=str(espuino.REPO_ROOT),
+            # The data folder, not the checkout: that is where the library and
+            # the manifests live, and in a packaged app the code is read-only.
+            cwd=str(espuino.DATA_ROOT),
             model=model,
             # Permission design (user decision 2026-07-23): "auto" + guardrails.
             # The auto-mode classifier (a separate model) silently approves or
@@ -385,13 +442,13 @@ class SessionManager:
             echo_text = url or ""
             label = (url or "URL")[:60]
         else:
-            query_text = CHAT_PREFIX.format(root=espuino.REPO_ROOT) + (text or "")
+            query_text = CHAT_PREFIX.format(root=espuino.DATA_ROOT) + (text or "")
             echo_text = text or ""
             label = (text or "Chat").strip().splitlines()[0][:60] if text else "Chat"
 
         # The can_use_tool callback is a bound method, so the session must exist
         # before the options/client that reference it.
-        progress_file = espuino.REPO_ROOT / f".studio-progress-{sid}.json"
+        progress_file = espuino.DATA_ROOT / f".studio-progress-{sid}.json"
         with contextlib.suppress(OSError):
             progress_file.unlink()  # drop any stale file from a crashed run
         session = Session(id=sid, kind=kind, model=model, label=label,

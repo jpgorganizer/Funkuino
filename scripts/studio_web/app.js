@@ -855,7 +855,7 @@ function renderCardsPanel(s) {
   const per = b.perPage || 12;
   $("#backlog-num").textContent = n != null ? n : "–";
   if (n == null) {
-    $("#backlog-word").textContent = "Rückstau unbekannt";
+    $("#backlog-word").textContent = "Anzahl unbekannt";
     $("#backlog-fill").style.width = "0%";
     $("#backlog-cap").textContent = `${per} pro Seite`;
     return;
@@ -868,7 +868,7 @@ function renderCardsPanel(s) {
   }
   const fullPages = Math.floor(n / per);
   const rest = n % per;
-  $("#backlog-word").textContent = "Cover im Rückstau";
+  $("#backlog-word").textContent = "noch nicht gedruckte Cover";
   $("#backlog-fill").style.width = (rest === 0 ? 100 : (rest / per) * 100).toFixed(0) + "%";
   const parts = [`${per} pro Seite`];
   if (fullPages > 0) parts.push(`${fullPages} volle Seite${fullPages === 1 ? "" : "n"}`);

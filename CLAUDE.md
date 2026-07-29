@@ -28,6 +28,7 @@ talk German); **code and documentation stay in English.**
 
 ```
 Funkuino/
+  bin/funkuino          # command dispatcher: `funkuino <command>` -> scripts/<command>.py
   sync                  # wrapper: rsync-style mirror to the device
   download              # wrapper: fetch audio into files/ (yt-dlp)
   prepare               # wrapper: merge a folder of tracks into one audiobook
@@ -61,6 +62,47 @@ External tools: **ffmpeg** (audio conversion/merge) and macOS **`say`** (spoken
 intros) must be on PATH; `id3v2` is not required. Python deps (incl. **Pillow**
 for the card sheets) come from `requirements.txt` in the venv.
 
+### Commands: one dispatcher, two spellings
+
+`bin/funkuino <command> [args…]` is the single entry point; a command is simply
+`scripts/<command>.py`, so an extension only has to drop its script there (the
+private overlay's `topic.py` does). Plus one special command, `funkuino python`,
+which is the venv interpreter with `scripts/` importable. The `./sync`,
+`./download`, … wrappers in the root are one-liners onto it and stay the
+convenient form **for humans**.
+
+**The Studio agent must use the `funkuino <command>` form** (its sessions get
+`bin/` on `PATH`). The reason is the permission layer: `ALLOWED_TOOLS` and
+`ASK_RULES` are *text* patterns matched against the Bash command line, and the
+`./` form only matches while the agent's cwd is the checkout — which stops being
+true as soon as code and data live apart. A path handed over in an environment
+variable would be worse still: `$FUNKUINO_HOME/sync`, `"${FUNKUINO_HOME}/sync"`
+and the expanded absolute path are three different strings, so an ask rule would
+be one spelling away from silently not firing. Both spellings are therefore
+listed in `ASK_RULES`, and `_bash_head()` keeps the *subcommand* for the
+dispatcher (`funkuino sync`), so an "always allow" on a harmless subcommand
+cannot generalise to `funkuino sync`.
+
+### Code root vs. data root
+
+`espuino.REPO_ROOT` is where the **code** lives (wrappers, scripts, Studio web
+assets) — read-only in a packaged app, so nothing may be written below it.
+`espuino.DATA_ROOT` is where the **user's stuff** lives and is what everything
+else derives from: `files/`, `card-covers/`, `print-sheets/`, `.sync-state/`,
+`.print-state.json`, `.env`, `.agent-allow.json`, `CLAUDE.local.md`, and the
+agent session's cwd. It resolves as **`FUNKUINO_DATA_DIR` > app config file
+(`~/Library/Application Support/Funkuino/config.json`, `{"data_dir": …}`) >
+the checkout**. Default = the checkout, so a plain `git clone` behaves exactly
+as before; the config file is how a packaged app tells the CLI which folder it
+was pointed at, so both operate on one library instead of diverging. Use
+`espuino.data_or_repo(name)` for the per-installation side files — they belong
+to the data folder but may still sit in the checkout (the private overlay
+symlinks them there).
+
+Consequence for the agent: with a separate data folder its cwd holds no
+CLAUDE.md, so `_system_append()` appends the code root's CLAUDE.md explicitly
+(`setting_sources=["project"]` still picks up a data-folder CLAUDE.md on top).
+
 ## Quickstart
 
 ```bash
@@ -76,7 +118,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 Config precedence: CLI flags > `ESPUINO_*` env vars > defaults. Relevant vars:
 `ESPUINO_HOST`, `ESPUINO_LOCAL_DIR`, `ESPUINO_REMOTE_ROOT`, and
 `ESPUINO_HTTP_USER` / `ESPUINO_HTTP_PASSWORD` (only if the web UI is password
-protected).
+protected). `FUNKUINO_DATA_DIR` moves the whole data folder (see *Code root vs.
+data root*): `FUNKUINO_DATA_DIR=/Volumes/Media/Funkuino ./cards --dry-run`.
 
 ## How the mirror works (and why)
 
@@ -286,16 +329,17 @@ cards), **Agent**, **Sync** (mirror with live log; Dry-Run always previews
   (`setting_sources=["project"]`); pasting a URL starts the guided intake flow
   (classify → download → verify naming/covers → report, questions in German).
 - **Permissions** (deliberate design decision): `permission_mode="auto"` +
-  guardrails. Read-only tools, the repo wrappers and `.venv/bin/python` are
-  allowlisted (deterministic, no classifier; a git-ignored `.agent-allow.json`
-  at the repo root may add machine-local patterns); an explicit **ask-list**
-  (`./sync`, `./cards`, `rm`, `rmdir`, `sudo`, `git push` — via `--settings`
+  guardrails. Read-only tools, the harmless commands (`funkuino download` /
+  `prepare` / `covers`) and `.venv/bin/python` are allowlisted (deterministic,
+  no classifier; a git-ignored `.agent-allow.json` may add machine-local
+  patterns); an explicit **ask-list** (`funkuino sync`, `funkuino cards`, `rm`,
+  `rmdir`, `sudo`, `git push` — via `--settings`
   JSON) always raises a browser permission card, because ask rules are
   evaluated *before* the mode; everything else is decided silently by the
   auto-mode classifier — it approves or **denies** (never asks; denials look
   like failed tool calls to the agent). `AskUserQuestion` is on the ask-list
   because auto mode routes around `can_use_tool`, which the question cards
-  depend on. Any `./sync` from the agent deliberately needs approval (it would
+  depend on. Any sync from the agent deliberately needs approval (it would
   bypass Studio's device lock — even a dry-run does the full recursive device
   listing) and is auto-denied while a Studio sync runs.
 - **Load-bearing SDK detail** (do not "simplify" away): sessions use

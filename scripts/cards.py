@@ -56,7 +56,7 @@ MARK_WIDTH = 2
 # and still count as "part of the uniform border".
 TRIM_TOL = 24
 
-STATE_FILE = espuino.REPO_ROOT / ".print-state.json"
+STATE_FILE = espuino.PRINT_STATE_FILE
 
 
 def cm(value: float) -> int:
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         if outp and Path(outp).exists():
             pdf = Path(outp)
             # Only auto-remove the tool's own timestamped sheet, never a custom --out.
-            if pdf.parent.resolve() == (espuino.REPO_ROOT / "print-sheets").resolve():
+            if pdf.parent.resolve() == espuino.PRINT_SHEETS_DIR.resolve():
                 pdf.unlink()
                 print(f"Removed the superseded sheet {pdf.name}.")
             else:
@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     pages = render_pages(covers, args.card_cm, args.cols,
                          marks=not args.no_marks, trim=not args.no_trim)
     out = Path(args.out) if args.out else (
-        espuino.REPO_ROOT / "print-sheets" / f"cards-{time.strftime('%Y%m%d-%H%M%S')}.pdf")
+        espuino.PRINT_SHEETS_DIR / f"cards-{time.strftime('%Y%m%d-%H%M%S')}.pdf")
     save_pdf(pages, out)
     print(f"\nWrote {out}  ({len(pages)} page(s), {len(covers)} card(s)).")
 

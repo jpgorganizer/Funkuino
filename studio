@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Thin wrapper: run the Funkuino Studio web app (scripts/studio.py).
+# Thin wrapper for humans: `./studio` == `funkuino studio` (see bin/funkuino).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$DIR/.venv/bin/python" "$DIR/scripts/studio.py" "$@"
+exec "$DIR/bin/funkuino" studio "$@"

@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Thin wrapper: run scripts/sync.py using the project venv.
+# Thin wrapper for humans: `./sync` == `funkuino sync` (see bin/funkuino).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ ! -x "$DIR/.venv/bin/python" ]]; then
-    echo "Project venv missing. Create it with:" >&2
-    echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
-    exit 1
-fi
-exec "$DIR/.venv/bin/python" "$DIR/scripts/sync.py" "$@"
+exec "$DIR/bin/funkuino" sync "$@"

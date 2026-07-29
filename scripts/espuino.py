@@ -48,15 +48,66 @@ from typing import Callable, Iterator, Optional
 
 import requests
 
+# Where the *code* lives: wrappers, scripts, the Studio web assets. In a
+# packaged app this is read-only (inside the bundle), so nothing may be written
+# below it — user data goes to DATA_ROOT instead.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Where the *data* lives: the media library, covers, print sheets and the
+# manifests. Defaults to the checkout (so a plain `git clone` behaves exactly as
+# before) but can point anywhere — an external disk, or the folder a packaged
+# app was configured with.
+APP_CONFIG_DIR = (
+    Path.home() / "Library" / "Application Support" / "Funkuino"
+    if os.uname().sysname == "Darwin" else
+    Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "funkuino"
+)
+APP_CONFIG_FILE = APP_CONFIG_DIR / "config.json"
+
+
+def _resolve_data_root() -> Path:
+    """FUNKUINO_DATA_DIR > app config file > the checkout.
+
+    The config file is the app's channel: it is written by the GUI's settings
+    pane and read here, so `./sync` from a terminal and the app operate on the
+    same library instead of silently diverging. It is absent in a plain
+    checkout, which is why the default stays REPO_ROOT.
+    """
+    if env := os.environ.get("FUNKUINO_DATA_DIR"):
+        return Path(env).expanduser().resolve()
+    try:
+        configured = json.loads(APP_CONFIG_FILE.read_text()).get("data_dir")
+    except (OSError, ValueError):
+        configured = None
+    return Path(configured).expanduser().resolve() if configured else REPO_ROOT
+
+
+DATA_ROOT = _resolve_data_root()
+
+
+def data_or_repo(name: str) -> Path:
+    """Locate a per-installation side file (``.env``, ``.agent-allow.json``,
+    ``CLAUDE.local.md``) in the data folder, falling back to the checkout.
+
+    These belong to the data folder, but an existing checkout may already hold
+    them (they predate DATA_ROOT, and the private overlay symlinks them into the
+    repo), so a configured data folder must not silently lose them.
+    """
+    candidate = DATA_ROOT / name
+    return candidate if candidate.exists() else REPO_ROOT / name
 
 # --- Defaults ---------------------------------------------------------------
 DEFAULT_HOST = "espuino.local"
-DEFAULT_LOCAL_DIR = REPO_ROOT / "files"
+DEFAULT_LOCAL_DIR = DATA_ROOT / "files"
 DEFAULT_REMOTE_ROOT = "/"
 # Full-resolution title images (for printing RFID cards) live here, mirroring the
 # files/ layout. Not uploaded (the device has no display); see IGNORE_PATTERNS.
-DEFAULT_COVERS_DIR = REPO_ROOT / "card-covers"
+DEFAULT_COVERS_DIR = DATA_ROOT / "card-covers"
+# Printable A4 sheets (cards.py) and the two manifests. All under DATA_ROOT so a
+# configured data folder carries the full state: library, covers, history.
+PRINT_SHEETS_DIR = DATA_ROOT / "print-sheets"
+PRINT_STATE_FILE = DATA_ROOT / ".print-state.json"
+SYNC_STATE_DIR = DATA_ROOT / ".sync-state"
 HTTP_PORT = 80
 
 # Web-interface control command codes (firmware src/values.h), sent over the

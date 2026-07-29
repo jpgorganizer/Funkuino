@@ -38,7 +38,7 @@ from sync_state import SyncState
 REMOTE_PROTECTED = {"/backup.txt"}
 
 # Per-device upload manifests live here as <host>.json.
-STATE_DIR = espuino.REPO_ROOT / ".sync-state"
+STATE_DIR = espuino.SYNC_STATE_DIR
 
 
 def _make_progress(remote_path: str, size: int):

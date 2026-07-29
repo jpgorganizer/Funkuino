@@ -326,7 +326,7 @@ body.scrolled .lib-table th { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35
 .backlog { margin-top: 6px; }
 .backlog-line { display: flex; align-items: baseline; gap: 10px; }
 .backlog-num { font-family: var(--font-display); font-size: 38px; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
-.backlog-word { font-size: 14px; color: var(--ink-soft); max-width: 12ch; }
+.backlog-word { font-size: 14px; color: var(--ink-soft); max-width: 22ch; }
 .backlog-meter { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 14px 0 8px; border: 1px solid var(--line-soft); }
 .backlog-meter span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .5s var(--ease); }
 .backlog-cap { color: var(--ink-faint); font-size: 12.5px; font-family: var(--font-mono); }
