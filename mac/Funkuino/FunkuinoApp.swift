@@ -127,12 +127,45 @@ final class StudioServer: ObservableObject {
 
 // MARK: - Web view
 
+/// Lets the page act as the window's drag region.
+///
+/// With a full-size content view the WKWebView covers the whole window, the
+/// transparent title bar included, and swallows the clicks that would otherwise
+/// move the window. So the page reports a drag started in its header (see
+/// initShell in app.js) and we hand that to AppKit.
+final class DragHandler: NSObject, WKScriptMessageHandler {
+    weak var webView: WKWebView?
+
+    func userContentController(_ controller: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard let window = webView?.window, let event = NSApp.currentEvent else { return }
+        window.performDrag(with: event)
+    }
+}
+
 struct StudioWebView: NSViewRepresentable {
     let url: URL
 
+    func makeCoordinator() -> DragHandler { DragHandler() }
+
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(context.coordinator, name: "shellDrag")
+        let view = WKWebView(frame: .zero, configuration: config)
+        context.coordinator.webView = view
         view.load(URLRequest(url: url))
+        // .windowStyle(.hiddenTitleBar) alone only hides the title: the window
+        // still reserves the title bar's height, which showed as a white strip
+        // above the page header. Configure the window itself so the content
+        // runs to the top edge and the traffic lights float over the header.
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.styleMask.insert(.fullSizeContentView)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            // Without a title bar to grab, the window would be hard to move.
+            window.isMovableByWindowBackground = true
+        }
         return view
     }
 
@@ -154,8 +187,11 @@ struct RootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .running(let url):
             // ?shell=mac tells the page it is inside this window, so its header
-            // can take over the role of the (hidden) title bar.
+            // can take over the role of the (hidden) title bar. ignoresSafeArea
+            // is what actually lets it reach the top edge — SwiftUI insets the
+            // content by the title bar height otherwise, hidden or not.
             StudioWebView(url: URL(string: "?shell=mac", relativeTo: url) ?? url)
+                .ignoresSafeArea()
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)

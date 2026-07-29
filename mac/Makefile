@@ -23,6 +23,10 @@ HERE        := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CODE_ROOT   := $(patsubst %/,%,$(dir $(patsubst %/,%,$(HERE))))
 BUILD       := $(HERE)build
 APP         := $(BUILD)/$(APP_NAME).app
+# The bundle is a directory, and a directory's mtime does not move when files
+# inside it are rewritten — making it the target let edited sources go
+# unnoticed. Depend on a stamp file instead.
+STAMP       := $(BUILD)/.app.stamp
 CONTENTS    := $(APP)/Contents
 DMG         := $(BUILD)/$(APP_NAME)-$(VERSION).dmg
 
@@ -35,7 +39,7 @@ NOTARY_PROFILE ?=
 
 .PHONY: all clean run sign notarize dmg icon
 
-all: $(APP)
+all: $(STAMP)
 
 $(ICON): $(HERE)icon.py
 	$(PYTHON) $(HERE)icon.py
@@ -44,7 +48,7 @@ icon: $(ICON)
 
 # Universal from the start: an Intel Mac must not be an afterthought discovered
 # at distribution time.
-$(APP): $(SOURCES) $(ICON) $(MAKEFILE_LIST)
+$(STAMP): $(SOURCES) $(ICON) $(MAKEFILE_LIST)
 	rm -rf "$(APP)"
 	mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources"
 	swiftc -O -parse-as-library -target arm64-apple-macos$(MIN_MACOS) \
@@ -60,14 +64,15 @@ $(APP): $(SOURCES) $(ICON) $(MAKEFILE_LIST)
 	    --name "$(APP_NAME)" --bundle-id "$(BUNDLE_ID)" \
 	    --version "$(VERSION)" --min-macos "$(MIN_MACOS)" \
 	    --code-root "$(CODE_ROOT)"
+	@touch "$(STAMP)"
 	@echo "built $(APP)"
 
-run: $(APP)
+run: $(STAMP)
 	open "$(APP)"
 
 # Every embedded binary needs its own signature, inside-out, before the bundle
 # itself — this is where a bundle with a Python runtime and ffmpeg will bite.
-sign: $(APP)
+sign: $(STAMP)
 	@test -n "$(DEV_ID)" || { echo "DEV_ID is not set"; exit 1; }
 	find "$(CONTENTS)" \( -name '*.dylib' -o -name '*.so' -o -perm -111 -type f \) \
 	    ! -path "$(CONTENTS)/MacOS/$(APP_NAME)" -print0 \
@@ -86,7 +91,7 @@ notarize: sign
 	xcrun stapler staple "$(APP)"
 	spctl --assess --type execute --verbose=4 "$(APP)"
 
-dmg: $(APP)
+dmg: $(STAMP)
 	rm -f "$(DMG)"
 	hdiutil create -volname "$(APP_NAME)" -srcfolder "$(APP)" -ov -format UDZO "$(DMG)"
 	@echo "wrote $(DMG)"

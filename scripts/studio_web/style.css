@@ -92,7 +92,9 @@ a { color: var(--accent); }
    float above this header. Leave them room, and shift the wordmark clear of
    them — the header band then reads as the window's title bar. */
 html[data-shell="mac"] .app-header {
-  padding-top: 34px;
+  padding-top: 38px;        /* traffic lights end ~22px down, plus breathing room */
+  -webkit-user-select: none; /* the band is a drag region — do not select text */
+  user-select: none;
 }
 html[data-shell="mac"] .wordmark {
   margin-left: 4px;

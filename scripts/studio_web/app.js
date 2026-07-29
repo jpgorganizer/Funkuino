@@ -1782,10 +1782,25 @@ function initScrollShadow() {
 }
 
 /** The native shell loads us with ?shell=mac; the stylesheet then makes the
- *  header double as the window's title bar (see .app-header). */
+ *  header double as the window's title bar (see .app-header).
+ *
+ *  The header also becomes the window's drag region: the app's WebView covers
+ *  the whole window including the (transparent) title bar, so AppKit never sees
+ *  those clicks and the window could not be moved. Report the drag instead —
+ *  but not from the controls in the header, which must stay clickable. */
 function initShell() {
   const shell = new URLSearchParams(location.search).get("shell");
-  if (shell) document.documentElement.dataset.shell = shell;
+  if (!shell) return;
+  document.documentElement.dataset.shell = shell;
+
+  const drag = window.webkit?.messageHandlers?.shellDrag;
+  const header = $(".app-header");
+  if (!drag || !header) return;
+  header.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 0) return;
+    if (ev.target.closest("button, a, input, select, textarea, [role='button']")) return;
+    drag.postMessage(null);
+  });
 }
 
 function init() {
