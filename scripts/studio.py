@@ -1156,7 +1156,30 @@ async def _json_body(request: web.Request) -> dict:
         return {}
 
 
+def _exit_with_parent() -> None:
+    """Exit once the process that started us is gone.
+
+    A GUI shell (Funkuino.app) starts this server as a child. Quitting the shell
+    normally lets it terminate us, but a crash, a force-quit or a plain SIGTERM
+    does not — and an orphaned server keeps the port and the device websocket
+    open, which then blocks the next start. Watching for reparenting (our ppid
+    changes to 1 / launchd) catches every one of those cases. Opt-in via
+    FUNKUINO_EXIT_WITH_PARENT so a terminal-started server is unaffected.
+    """
+    original = os.getppid()
+
+    def watch() -> None:
+        while os.getppid() == original:
+            time.sleep(1.0)
+        os._exit(0)  # hard exit: the parent is gone, nobody is left to serve
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def main(argv: list[str] | None = None) -> int:
+    if os.environ.get("FUNKUINO_EXIT_WITH_PARENT"):
+        _exit_with_parent()
+
     parser = argparse.ArgumentParser(description="Funkuino Studio web app.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
                         help=f"Port to bind (default {DEFAULT_PORT})")

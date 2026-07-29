@@ -34,3 +34,7 @@ print-sheets/
 
 # Transient per-agent-session intake progress files (Funkuino Studio)
 .studio-progress-*
+
+# macOS app build output and the generated icon (mac/icon.py rebuilds it)
+mac/build/
+mac/Funkuino.icns
