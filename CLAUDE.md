@@ -7,6 +7,8 @@ driven from scripts instead of clicking through the web interface.
 The primary users are German-speaking (the Studio UI and the embedded agent
 talk German); **code and documentation stay in English.**
 
+Single-maintainer repo: **commit straight to `main`**, no feature branches.
+
 ## The device
 
 - Reachable at `espuino.local` by default; any hostname/IP works via `--host`
@@ -48,6 +50,7 @@ Funkuino/
     studio_state.py     # Studio: library scan -> per-card pipeline status
     studio_agent.py     # Studio: Claude Agent SDK session manager
     studio_web/         # Studio: vanilla-JS frontend (index.html, app.js, style.css)
+  extensions/           # git-ignored; commands not shipped with the app (see below)
   files/                # local media library (git-ignored) -> mirrored to device
   card-covers/          # git-ignored; full-res title images for printing cards
   print-sheets/         # git-ignored; generated printable PDFs
@@ -65,11 +68,11 @@ for the card sheets) come from `requirements.txt` in the venv.
 ### Commands: one dispatcher, two spellings
 
 `bin/funkuino <command> [args…]` is the single entry point; a command is simply
-`scripts/<command>.py`, so an extension only has to drop its script there (the
-private overlay's `topic.py` does). Plus one special command, `funkuino python`,
-which is the venv interpreter with `scripts/` importable. The `./sync`,
-`./download`, … wrappers in the root are one-liners onto it and stay the
-convenient form **for humans**.
+`scripts/<command>.py`, or `<data folder>/extensions/<command>.py` for anything
+not shipped with the app (see *Extensions*). Plus one special command,
+`funkuino python`, which is the venv interpreter with `scripts/` importable. The
+`./sync`, `./download`, … wrappers in the root are one-liners onto it and stay
+the convenient form **for humans**.
 
 **The Studio agent must use the `funkuino <command>` form** (its sessions get
 `bin/` on `PATH`). The reason is the permission layer: `ALLOWED_TOOLS` and
@@ -102,6 +105,30 @@ symlinks them there).
 Consequence for the agent: with a separate data folder its cwd holds no
 CLAUDE.md, so `_system_append()` appends the code root's CLAUDE.md explicitly
 (`setting_sources=["project"]` still picks up a data-folder CLAUDE.md on top).
+
+### Extensions
+
+Commands that are not shipped with the app — private tooling, machine-local
+helpers — live in `<data folder>/extensions/`:
+
+```
+extensions/topic.py                  # the command: `funkuino topic …`
+extensions/topic.permissions.json    # {"allow": [...], "ask": [...]} for the agent
+```
+
+The script is run with `scripts/` on `PYTHONPATH`, so it imports `espuino`,
+`download`, … like a shipped one (it is usually a symlink into another checkout,
+and Python would otherwise resolve the sibling imports next to the *target*).
+`studio_agent._extension_rules()` merges every `*.permissions.json` into
+`ALLOWED_TOOLS`/`ASK_RULES`, so an extension carries its own gating instead of
+this repo needing to know about it; an extension that declares nothing falls
+through to the auto-mode classifier, which is the safe default. A broken
+manifest is skipped, never fatal.
+
+Why not `scripts/`: that is the code root, read-only in a packaged app. The
+private overlay's `install` therefore links into `extensions/` and cleans up its
+older `scripts/topic.py` / `.agent-allow.json` links (which still work in a
+checkout — `.agent-allow.json` is still read — but have no place in an app).
 
 ## Quickstart
 

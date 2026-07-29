@@ -18,6 +18,10 @@ CLAUDE.local.md
 .agent-allow.json
 .claude/settings.local.json
 
+# Installed extensions (commands the app does not ship) — these live in the
+# data folder, which is the checkout unless configured otherwise
+extensions/
+
 # Per-device upload manifests (device/machine-specific)
 .sync-state/
 

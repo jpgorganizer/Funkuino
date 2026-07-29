@@ -75,6 +75,32 @@ try:
 except (OSError, ValueError):
     pass
 
+
+def _extension_rules() -> tuple[list[str], list[str]]:
+    """Permission patterns contributed by installed extensions.
+
+    An extension is ``<data folder>/extensions/<name>.py``; an optional sibling
+    ``<name>.permissions.json`` (``{"allow": [...], "ask": [...]}``) declares how
+    its command should be gated. Shipping the rules with the extension is what
+    lets a private or machine-local command exist without editing this file —
+    and an extension that declares nothing simply falls through to the auto-mode
+    classifier, which is the safe default.
+    """
+    allow: list[str] = []
+    ask: list[str] = []
+    for manifest in sorted((espuino.DATA_ROOT / "extensions").glob("*.permissions.json")):
+        try:
+            rules = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            continue  # a broken manifest must not take the agent down
+        allow += [str(p) for p in rules.get("allow", [])]
+        ask += [str(p) for p in rules.get("ask", [])]
+    return allow, ask
+
+
+_EXT_ALLOW, _EXT_ASK = _extension_rules()
+ALLOWED_TOOLS += _EXT_ALLOW
+
 # Ask rules: ALWAYS raise a browser card, even in auto mode — Claude Code
 # evaluates permission rules deny -> ask -> mode(classifier) -> allow, so these
 # beat the classifier AND the allowlist (which is why ./cards --dry-run is not
@@ -89,7 +115,7 @@ ASK_RULES = [
     "Bash(funkuino cards*)", "Bash(./cards*)",  # a real print mutates the manifest
     "Bash(rm*)", "Bash(rmdir*)", "Bash(sudo*)",
     "Bash(git push*)",
-]
+] + _EXT_ASK
 
 # Passed to the CLI via --settings (the SDK forwards a JSON string verbatim).
 SETTINGS_JSON = json.dumps({"permissions": {"ask": ASK_RULES}})

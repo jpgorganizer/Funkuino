@@ -12,8 +12,10 @@
 # "${FUNKUINO_HOME}/sync" and the expanded absolute path are all different
 # strings, so an ask rule would be one spelling away from being bypassed.
 #
-# A command <name> is `scripts/<name>.py`, so an extension only has to drop its
-# script there (the private overlay's topic.py does exactly that).
+# A command <name> is `scripts/<name>.py` — or, for anything not shipped with
+# the app, `<data folder>/extensions/<name>.py`. The extensions directory is the
+# supported place for private or machine-local tooling: the code root is
+# read-only in a packaged app, so nothing may be installed into scripts/ there.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,6 +23,19 @@ PY="$ROOT/.venv/bin/python"
 
 # Support modules, not commands.
 INTERNAL=" espuino sync_state print_state studio_state studio_agent progress "
+
+# Resolve the data folder the same way espuino.py does — by asking it, so the
+# precedence (env > app config file > checkout) lives in exactly one place.
+# Only needed when a command is not part of the shipped set, so the common path
+# stays free of the interpreter start-up.
+data_root() {
+    if [[ -n "${FUNKUINO_DATA_DIR:-}" ]]; then
+        printf '%s' "$FUNKUINO_DATA_DIR"
+    else
+        "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import espuino
+print(espuino.DATA_ROOT)' "$ROOT/scripts" 2>/dev/null || printf '%s' "$ROOT"
+    fi
+}
 
 usage() {
     echo "Usage: funkuino <command> [args…]" >&2
@@ -31,6 +46,14 @@ usage() {
         [[ "$INTERNAL" == *" $name "* ]] || echo "  $name" >&2
     done
     echo "  python              # the project venv's interpreter" >&2
+    local ext_dir; ext_dir="$(data_root)/extensions"
+    if compgen -G "$ext_dir/*.py" > /dev/null; then
+        echo >&2
+        echo "Extensions ($ext_dir):" >&2
+        for script in "$ext_dir"/*.py; do
+            echo "  $(basename "$script" .py)" >&2
+        done
+    fi
 }
 
 [[ $# -ge 1 ]] || { usage; exit 2; }
@@ -46,8 +69,16 @@ case "$cmd" in
         exec env PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" "$PY" "$@" ;;
 esac
 
-script="$ROOT/scripts/$cmd.py"
-if [[ "$INTERNAL" == *" $cmd "* || ! -f "$script" ]]; then
+script=""
+if [[ "$INTERNAL" != *" $cmd "* && -f "$ROOT/scripts/$cmd.py" ]]; then
+    script="$ROOT/scripts/$cmd.py"
+elif [[ "$cmd" == */* || "$cmd" == .* ]]; then
+    : # never let a command name escape into a path lookup
+elif [[ -f "$(data_root)/extensions/$cmd.py" ]]; then
+    script="$(data_root)/extensions/$cmd.py"
+fi
+
+if [[ -z "$script" ]]; then
     echo "funkuino: unknown command '$cmd'" >&2
     usage
     exit 2
