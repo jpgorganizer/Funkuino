@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-// MARK: - Configuration
+// MARK: - AppConfiguration
 
 struct AppConfig: Codable, Equatable {
     /// Written as `data_dir` — espuino.py's key, this file has two readers.
@@ -21,7 +21,7 @@ struct AppConfig: Codable, Equatable {
 }
 
 @MainActor
-final class Configuration: ObservableObject {
+final class AppConfiguration: ObservableObject {
     @Published private(set) var config: AppConfig?
     /// Set while the user re-runs setup on an already configured installation.
     @Published var forceSetup = false
@@ -76,7 +76,7 @@ final class Configuration: ObservableObject {
 // MARK: - Setup view
 
 struct SetupView: View {
-    @EnvironmentObject var configuration: Configuration
+    @EnvironmentObject var configuration: AppConfiguration
 
     @State private var folder: String = ""
     @State private var host: String = "espuino.local"
@@ -91,36 +91,41 @@ struct SetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Willkommen bei Funkuino").font(.largeTitle.weight(.semibold))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    WaveMark(height: 22)
+                    Text("Willkommen bei Funkuino").font(Theme.display(28))
+                }
                 Text("Zwei Angaben, dann kann es losgehen.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.inkSoft)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Datenordner").font(.headline)
+                Text("Datenordner").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
                 Text("Hier liegen deine Hörspiele und Lieder, die Titelbilder für "
                      + "die Karten, die Druckbögen und der Abgleichstand. Du kannst "
                      + "ihn auf eine externe Platte legen.")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    TextField("", text: $folder).textFieldStyle(.roundedBorder)
-                    Button("Wählen…") { choose() }
+                    TextField("", text: $folder).textFieldStyle(FunkuinoFieldStyle())
+                    Button("Wählen…") { choose() }.buttonStyle(FunkuinoButtonStyle())
                 }
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("ESPuino").font(.headline)
+                Text("ESPuino").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
                 Text("Der Netzwerkname oder die IP-Adresse deines Geräts. "
                      + "Lässt sich später ändern.")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    TextField("espuino.local", text: $host).textFieldStyle(.roundedBorder)
+                    TextField("espuino.local", text: $host).textFieldStyle(FunkuinoFieldStyle())
                     Button(probing ? "Prüfe…" : "Verbindung testen") { test() }
+                        .buttonStyle(FunkuinoButtonStyle())
                         .disabled(probing || host.isEmpty)
                 }
                 if let probe {
-                    Text(probe).font(.callout).foregroundStyle(.secondary)
+                    Text(probe).font(.system(size: 12.5, design: .monospaced))
+                        .foregroundStyle(Theme.inkFaint)
                 }
             }
 
@@ -134,7 +139,7 @@ struct SetupView: View {
                          + "Installieren mit: brew install ffmpeg")
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.system(size: 12.5)).foregroundStyle(Theme.warn)
             }
 
             if let error {
@@ -144,12 +149,14 @@ struct SetupView: View {
             HStack {
                 Spacer()
                 Button("Fertig") { finish() }
+                    .buttonStyle(FunkuinoButtonStyle(prominent: true))
                     .keyboardShortcut(.defaultAction)
                     .disabled(folder.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(34)
-        .frame(minWidth: 560)
+        .padding(38)
+        .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(PaperBackground())
         .onAppear {
             if folder.isEmpty {
                 folder = configuration.config?.dataDir ?? defaultFolder

@@ -26,7 +26,7 @@ enum Snapshot {
 
         switch name {
         case "setup":
-            content = AnyView(SetupView().environmentObject(Configuration()))
+            content = AnyView(SetupView().environmentObject(AppConfiguration()))
         case "failure":
             content = AnyView(FailureView(
                 message: "Der Server hat sich beendet.\n\nTraceback (most recent "

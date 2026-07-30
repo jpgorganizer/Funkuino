@@ -266,7 +266,7 @@ struct StudioWebView: NSViewRepresentable {
 struct RootView: View {
     @EnvironmentObject var server: StudioServer
     @EnvironmentObject var web: WebViewBox
-    @EnvironmentObject var configuration: Configuration
+    @EnvironmentObject var configuration: AppConfiguration
 
     var body: some View {
         if configuration.needsSetup {
@@ -309,11 +309,13 @@ struct RootView: View {
 
 struct StartingView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Studio startet…").foregroundStyle(.secondary)
+        VStack(spacing: 14) {
+            WaveMark(height: 26)
+            Text("Studio startet…")
+                .font(Theme.display(17)).foregroundStyle(Theme.inkSoft)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PaperBackground())
     }
 }
 
@@ -322,18 +324,28 @@ struct FailureView: View {
     let onSetup: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+        VStack(spacing: 18) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30)).foregroundStyle(Theme.warn)
+            Text("Studio konnte nicht starten")
+                .font(Theme.display(20)).foregroundStyle(Theme.ink)
             // Selectable: the tail of the server's own output is in here, and
             // that is what gets pasted into a bug report.
             Text(message)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
                 .textSelection(.enabled)
-                .font(.callout.monospaced())
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Theme.inkSoft)
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radius)
+                    .stroke(Theme.line, lineWidth: 1))
             Button("Einrichtung ändern…", action: onSetup)
+                .buttonStyle(FunkuinoButtonStyle())
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PaperBackground())
     }
 }
 
@@ -373,7 +385,7 @@ struct FunkuinoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var server = StudioServer()
     @StateObject private var web = WebViewBox()
-    @StateObject private var configuration = Configuration()
+    @StateObject private var configuration = AppConfiguration()
 
     var body: some Scene {
         WindowGroup("Funkuino Studio") {
