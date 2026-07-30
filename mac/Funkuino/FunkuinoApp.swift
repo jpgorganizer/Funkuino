@@ -26,6 +26,9 @@ final class StudioServer: ObservableObject {
 
     private var process: Process?
     private let codeRoot: URL
+    /// The child's own output. Without it a failing server is a silent 30 s
+    /// wait ending in "no answer", while the reason sat on its stderr.
+    private var output: [String] = []
 
     init() {
         // The shipped code lives in the bundle, next to its own Python runtime.
@@ -54,8 +57,8 @@ final class StudioServer: ObservableObject {
         }
 
         let dispatcher = codeRoot.appendingPathComponent("bin/funkuino")
-        guard FileManager.default.isExecutableFile(atPath: dispatcher.path) else {
-            state = .failed("bin/funkuino nicht gefunden unter \(codeRoot.path)")
+        if let problem = Self.checkPrerequisites(codeRoot: codeRoot, config: config) {
+            state = .failed(problem)
             return
         }
 
@@ -77,6 +80,17 @@ final class StudioServer: ObservableObject {
         env["FUNKUINO_CONFIG_DIR"] = configDir.path
         proc.environment = env
 
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty, let text = String(data: chunk, encoding: .utf8) else { return }
+            Task { @MainActor in
+                self?.append(text)
+            }
+        }
+
         do {
             try proc.run()
         } catch {
@@ -94,7 +108,9 @@ final class StudioServer: ObservableObject {
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
             if process?.isRunning == false {
-                await MainActor.run { state = .failed("Server hat sich beendet.") }
+                await MainActor.run {
+                    state = .failed(describe("Der Server hat sich beendet."))
+                }
                 return
             }
             var request = URLRequest(url: url)
@@ -106,7 +122,57 @@ final class StudioServer: ObservableObject {
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        await MainActor.run { state = .failed("Server antwortet nicht.") }
+        await MainActor.run {
+            state = .failed(describe("Der Server antwortet nicht."))
+        }
+    }
+
+    private func append(_ text: String) {
+        output.append(contentsOf: text.split(separator: "\n").map(String.init))
+        if output.count > 40 { output.removeFirst(output.count - 40) }
+    }
+
+    /// A headline plus what the server last said — the useful half.
+    private func describe(_ headline: String) -> String {
+        let tail = output.suffix(8).joined(separator: "\n")
+        return tail.isEmpty ? headline : headline + "\n\n" + tail
+    }
+
+    /// Everything that must be in place before starting is worth its own
+    /// message: "no answer" after 30 seconds is not a diagnosis.
+    static func checkPrerequisites(codeRoot: URL, config: AppConfig) -> String? {
+        let fm = FileManager.default
+        let dispatcher = codeRoot.appendingPathComponent("bin/funkuino")
+        guard fm.isExecutableFile(atPath: dispatcher.path) else {
+            return "Das Programm ist unvollständig: bin/funkuino fehlt unter "
+                 + codeRoot.path + "."
+        }
+        let interpreter = codeRoot.appendingPathComponent("runtime/bin/python3")
+        let venv = codeRoot.appendingPathComponent(".venv/bin/python")
+        guard fm.isExecutableFile(atPath: interpreter.path)
+                || fm.isExecutableFile(atPath: venv.path) else {
+            return "Das Programm ist unvollständig: die Python-Laufzeit fehlt im "
+                 + "Programmpaket."
+        }
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: config.dataDir, isDirectory: &isDir), isDir.boolValue else {
+            return "Der Datenordner \(config.dataDir) ist nicht erreichbar. Liegt "
+                 + "er auf einer Platte, die gerade nicht angeschlossen ist?"
+        }
+        guard fm.isWritableFile(atPath: config.dataDir) else {
+            return "Keine Schreibrechte im Datenordner \(config.dataDir)."
+        }
+        return nil
+    }
+
+    /// ffmpeg is only needed for downloading and merging, so its absence is a
+    /// warning rather than a blocked start — library, sync and printing work.
+    static func findFFmpeg() -> String? {
+        for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+            let candidate = directory + "/ffmpeg"
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return nil
     }
 
     /// Must run on quit: an orphaned server would keep the port and the device
@@ -234,9 +300,18 @@ struct RootView: View {
             StudioWebView(url: URL(string: "?shell=mac", relativeTo: url) ?? url, box: web)
                 .ignoresSafeArea()
         case .failed(let message):
-            VStack(spacing: 12) {
+            VStack(spacing: 16) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
-                Text(message).multilineTextAlignment(.center)
+                // Selectable: the tail of the server's own output is in here,
+                // and that is what gets pasted into a bug report.
+                Text(message)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .font(.callout.monospaced())
+                Button("Einrichtung ändern…") {
+                    server.stop()
+                    configuration.forceSetup = true
+                }
             }
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

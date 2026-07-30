@@ -124,6 +124,19 @@ struct SetupView: View {
                 }
             }
 
+            if StudioServer.findFFmpeg() == nil {
+                // Not a blocker: only downloading and merging need it.
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text("ffmpeg wurde nicht gefunden. Mediathek, Abgleich und "
+                         + "Kartendruck funktionieren, zum Herunterladen und "
+                         + "Zusammenschneiden von Hörspielen fehlt es aber. "
+                         + "Installieren mit: brew install ffmpeg")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.callout).foregroundStyle(.secondary)
+            }
+
             if let error {
                 Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
