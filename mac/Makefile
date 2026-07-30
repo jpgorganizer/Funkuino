@@ -88,13 +88,32 @@ notarize: sign
 	ditto -c -k --keepParent "$(APP)" "$(BUILD)/$(APP_NAME).zip"
 	xcrun notarytool submit "$(BUILD)/$(APP_NAME).zip" \
 	    --keychain-profile "$(NOTARY_PROFILE)" --wait
-	xcrun stapler staple "$(APP)"
+	for i in 1 2 3 4 5 6; do \
+	    xcrun stapler staple "$(APP)" && break || { echo "ticket not ready, waiting…"; sleep 30; }; \
+	done
 	spctl --assess --type execute --verbose=4 "$(APP)"
 
 dmg: $(STAMP)
 	rm -f "$(DMG)"
 	hdiutil create -volname "$(APP_NAME)" -srcfolder "$(APP)" -ov -format UDZO "$(DMG)"
 	@echo "wrote $(DMG)"
+
+# The whole distribution path in one go. The disk image is notarised too, not
+# just the app inside it: Gatekeeper checks what the user actually downloaded.
+# Stapling is retried because Apple's ticket service can lag behind its own
+# "Accepted" by minutes — an unstapled build still passes, but only online.
+release: notarize
+	$(MAKE) dmg
+	# The disk image needs its own signature: notarising an unsigned one leaves
+	# Gatekeeper with "no usable signature" for the very file people download.
+	codesign --force --timestamp --sign "$(DEV_ID)" "$(DMG)"
+	xcrun notarytool submit "$(DMG)" --keychain-profile "$(NOTARY_PROFILE)" --wait
+	for i in 1 2 3 4 5 6; do \
+	    xcrun stapler staple "$(DMG)" && break || { echo "ticket not ready, waiting…"; sleep 30; }; \
+	done
+	xcrun stapler validate "$(DMG)"
+	@echo
+	@echo "Ready to hand out: $(DMG)"
 
 clean:
 	rm -rf "$(BUILD)" "$(ICON)"
