@@ -38,7 +38,11 @@ print(espuino.DATA_ROOT)' "$ROOT/scripts" 2>/dev/null || printf '%s' "$ROOT"
 }
 
 usage() {
-    echo "Usage: funkuino <command> [args…]" >&2
+    echo "Usage: funkuino [--config-dir DIR] [--data-dir DIR] <command> [args…]" >&2
+    echo >&2
+    echo "Global options:" >&2
+    echo "  --config-dir DIR    where the installation's config.json lives" >&2
+    echo "  --data-dir DIR      the media library, covers, manifests" >&2
     echo >&2
     echo "Commands:" >&2
     for script in "$ROOT"/scripts/*.py; do
@@ -55,6 +59,18 @@ usage() {
         done
     fi
 }
+
+# Global options come before the command and are passed on as environment, not
+# as arguments: they have to take effect before Python starts, because espuino.py
+# resolves both roots at import time. This is also the lever for testing the
+# first-run flow repeatedly (`funkuino --config-dir /tmp/probe studio`).
+while [[ $# -ge 2 ]]; do
+    case "$1" in
+        --config-dir) export FUNKUINO_CONFIG_DIR="$2"; shift 2 ;;
+        --data-dir)   export FUNKUINO_DATA_DIR="$2";   shift 2 ;;
+        *) break ;;
+    esac
+done
 
 [[ $# -ge 1 ]] || { usage; exit 2; }
 

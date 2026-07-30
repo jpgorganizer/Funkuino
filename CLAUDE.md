@@ -96,8 +96,14 @@ assets) — read-only in a packaged app, so nothing may be written below it.
 else derives from: `files/`, `card-covers/`, `print-sheets/`, `.sync-state/`,
 `.print-state.json`, `.env`, `.agent-allow.json`, `CLAUDE.local.md`, and the
 agent session's cwd. It resolves as **`FUNKUINO_DATA_DIR` > app config file
-(`~/Library/Application Support/Funkuino/config.json`, `{"data_dir": …}`) >
-the checkout**. Default = the checkout, so a plain `git clone` behaves exactly
+(`config.json`, `{"data_dir": …}`, in `FUNKUINO_CONFIG_DIR` or
+`~/Library/Application Support/Funkuino`) > the checkout**.
+
+Both roots are also dispatcher options — `funkuino --config-dir DIR --data-dir
+DIR <command>` — which export the variables before Python starts, since
+espuino.py resolves them at *import* time (a flag parsed inside a script would
+be too late). `--config-dir` is how the app's first-run flow is tested
+repeatedly without disturbing the real installation. Default = the checkout, so a plain `git clone` behaves exactly
 as before; the config file is how a packaged app tells the CLI which folder it
 was pointed at, so both operate on one library instead of diverging. Use
 `espuino.data_or_repo(name)` for the per-installation side files — they belong

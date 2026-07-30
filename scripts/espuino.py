@@ -57,11 +57,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # manifests. Defaults to the checkout (so a plain `git clone` behaves exactly as
 # before) but can point anywhere — an external disk, or the folder a packaged
 # app was configured with.
-APP_CONFIG_DIR = (
-    Path.home() / "Library" / "Application Support" / "Funkuino"
-    if os.uname().sysname == "Darwin" else
-    Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "funkuino"
-)
+def _default_config_dir() -> Path:
+    return (Path.home() / "Library" / "Application Support" / "Funkuino"
+            if os.uname().sysname == "Darwin" else
+            Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "funkuino")
+
+
+# FUNKUINO_CONFIG_DIR points the whole installation at a different config
+# directory — that is how the first-run flow gets tested repeatedly without
+# touching the real one (`funkuino --config-dir /tmp/probe studio`), and how a
+# second installation stays separate.
+APP_CONFIG_DIR = Path(
+    os.environ.get("FUNKUINO_CONFIG_DIR") or _default_config_dir()).expanduser()
 APP_CONFIG_FILE = APP_CONFIG_DIR / "config.json"
 
 
