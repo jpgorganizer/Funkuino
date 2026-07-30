@@ -502,6 +502,50 @@ here have **no** `/SD-Card` prefix (that prefix only exists over FTP).
 - The web UI's file tree caches; after cleaning up on the device, reload it or it
   shows stale duplicates.
 
+## macOS app (`mac/`)
+
+Studio packaged as a double-clickable app, distributed as a notarised DMG (not
+the App Store: the sandbox cannot read a library the user points at anywhere,
+and yt-dlp must stay updatable, which App Store rules forbid).
+
+```
+mac/Funkuino/FunkuinoApp.swift   # the whole shell: window, server child, drag, reload
+mac/Makefile                     # build, sign, notarise, DMG — `make release`
+mac/runtime.py                   # assembles the embedded Python runtime
+mac/plist.py                     # generates Info.plist
+mac/icon.py                      # renders the icon from the wordmark's wave motif
+```
+
+- **The shell holds no logic.** It starts `funkuino studio` on a free localhost
+  port as a child process and shows it in a WKWebView once it answers, so the
+  app can be dropped without touching the tool. Page and window are joined:
+  no native title bar (it would repeat the wordmark), the header doubles as the
+  title bar and reports drags via `?shell=mac` — see *Commands* in style.css.
+- **Never let the server outlive the app**: the shell handles SIGTERM/SIGINT,
+  and `FUNKUINO_EXIT_WITH_PARENT` makes studio.py exit when its parent
+  disappears (covers a crash or a force-quit). An orphan keeps the port and the
+  device websocket.
+- **Embedded runtime** (`mac/runtime.py`, ~150 MB): a pinned
+  python-build-standalone release, verified against the release's SHA256SUMS,
+  plus `requirements.txt`. It drops the Claude Code CLI that claude-agent-sdk
+  ships (245 MB — the SDK falls back to the user's own installation, which is
+  the deliberate design: the agent is optional and its CLI is the user's to
+  install). Kept across `make clean`; `make distclean` removes it.
+- **One architecture per build.** pip has to run the interpreter it installs
+  into, so the runtime is single-arch and the shell is built to match — a
+  universal shell would only mean an Intel Mac launches and then fails at the
+  first Python call. An Intel build is the same `make release` on an Intel Mac.
+- **Signing** batches the runtime's hundreds of `.so` files into few codesign
+  calls (each invocation costs a timestamp round-trip). The disk image needs
+  its own signature *and* notarisation — an unsigned but notarised DMG is
+  rejected with "no usable signature". Stapling retries: Apple's ticket service
+  lags its own "Accepted" by minutes.
+- **Testing a fresh install**: `--config-dir` / `--data-dir` (see *Code root vs.
+  data root*) point a run at scratch directories. Only a quarantined copy
+  exercises Gatekeeper — plain `cp` does not set the attribute, so nothing is
+  checked; `xattr -w com.apple.quarantine "0083;00000000;Safari;" <app>`
+  simulates a download.
+
 ## Roadmap / notes
 
 - **Optional custom firmware:** the single most useful change would be adding a

@@ -28,10 +28,19 @@ final class StudioServer: ObservableObject {
     private let codeRoot: URL
 
     init() {
-        // Baked in at build time; overridable for development.
+        // The shipped code lives in the bundle, next to its own Python runtime.
+        // FUNKUINO_CODE_ROOT overrides it for development against a checkout;
+        // the baked path is the last resort for an unpackaged debug build.
+        let bundled = Bundle.main.resourceURL?.appendingPathComponent("code")
         let baked = Bundle.main.object(forInfoDictionaryKey: "FunkuinoCodeRoot") as? String
-        let path = ProcessInfo.processInfo.environment["FUNKUINO_CODE_ROOT"] ?? baked ?? ""
-        codeRoot = URL(fileURLWithPath: path)
+        if let override = ProcessInfo.processInfo.environment["FUNKUINO_CODE_ROOT"] {
+            codeRoot = URL(fileURLWithPath: override)
+        } else if let bundled,
+                  FileManager.default.fileExists(atPath: bundled.path) {
+            codeRoot = bundled
+        } else {
+            codeRoot = URL(fileURLWithPath: baked ?? "")
+        }
     }
 
     func start() {

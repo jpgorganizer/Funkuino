@@ -19,7 +19,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY="$ROOT/.venv/bin/python"
+# Packaged app: an interpreter with the dependencies ships next to the code.
+# Checkout: the project venv. They never coexist, so the order is arbitrary.
+if [[ -x "$ROOT/runtime/bin/python3" ]]; then
+    PY="$ROOT/runtime/bin/python3"
+else
+    PY="$ROOT/.venv/bin/python"
+fi
 
 # Support modules, not commands.
 INTERNAL=" espuino sync_state print_state studio_state studio_agent progress "

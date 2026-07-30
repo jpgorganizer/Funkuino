@@ -18,6 +18,7 @@ APP_NAME    := Funkuino
 BUNDLE_ID   := de.sadilek.funkuino
 VERSION     := 0.1.0
 MIN_MACOS   := 14.0
+ARCH        := $(shell uname -m)
 
 HERE        := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CODE_ROOT   := $(patsubst %/,%,$(dir $(patsubst %/,%,$(HERE))))
@@ -31,13 +32,18 @@ CONTENTS    := $(APP)/Contents
 DMG         := $(BUILD)/$(APP_NAME)-$(VERSION).dmg
 
 SOURCES     := $(wildcard $(HERE)$(APP_NAME)/*.swift)
+RUNTIME     := $(BUILD)/runtime
+# What the app carries of this project: the dispatcher, the scripts, and the
+# instructions the embedded agent loads (its working directory is the user's
+# data folder, which has no CLAUDE.md of its own).
+CODE        := bin scripts requirements.txt CLAUDE.md
 ICON        := $(HERE)$(APP_NAME).icns
 PYTHON      := $(CODE_ROOT)/.venv/bin/python
 
 DEV_ID         ?=
 NOTARY_PROFILE ?=
 
-.PHONY: all clean run sign notarize dmg icon
+.PHONY: all clean distclean run sign notarize dmg icon runtime release
 
 all: $(STAMP)
 
@@ -46,19 +52,28 @@ $(ICON): $(HERE)icon.py
 
 icon: $(ICON)
 
-# Universal from the start: an Intel Mac must not be an afterthought discovered
-# at distribution time.
-$(STAMP): $(SOURCES) $(ICON) $(MAKEFILE_LIST)
+# ~150 MB: a pinned CPython plus this project's dependencies, so the app needs
+# neither Homebrew nor a venv. Built once and kept — `make clean` leaves it.
+$(RUNTIME):
+	python3 $(HERE)runtime.py --out "$(RUNTIME)"
+
+runtime: $(RUNTIME)
+
+# One architecture, not universal: the embedded Python is single-architecture
+# (pip has to run the interpreter it installs into), so a universal shell would
+# only mean an Intel Mac launches the app and then fails at the first Python
+# call. Refusing to launch is the better failure. An Intel build is the same
+# `make release` run on an Intel Mac.
+$(STAMP): $(SOURCES) $(ICON) $(RUNTIME) $(MAKEFILE_LIST)
 	rm -rf "$(APP)"
 	mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources"
-	swiftc -O -parse-as-library -target arm64-apple-macos$(MIN_MACOS) \
-	    -o "$(BUILD)/$(APP_NAME).arm64" $(SOURCES)
-	swiftc -O -parse-as-library -target x86_64-apple-macos$(MIN_MACOS) \
-	    -o "$(BUILD)/$(APP_NAME).x86_64" $(SOURCES)
-	lipo -create -output "$(CONTENTS)/MacOS/$(APP_NAME)" \
-	    "$(BUILD)/$(APP_NAME).arm64" "$(BUILD)/$(APP_NAME).x86_64"
-	rm -f "$(BUILD)/$(APP_NAME).arm64" "$(BUILD)/$(APP_NAME).x86_64"
+	swiftc -O -parse-as-library -target $(ARCH)-apple-macos$(MIN_MACOS) \
+	    -o "$(CONTENTS)/MacOS/$(APP_NAME)" $(SOURCES)
 	cp "$(ICON)" "$(CONTENTS)/Resources/$(APP_NAME).icns"
+	mkdir -p "$(CONTENTS)/Resources/code"
+	cd "$(CODE_ROOT)" && rsync -a --delete --exclude '__pycache__' \
+	    $(CODE) "$(CONTENTS)/Resources/code/"
+	rsync -a --delete "$(RUNTIME)/" "$(CONTENTS)/Resources/code/runtime/"
 	$(PYTHON) "$(HERE)plist.py" \
 	    --out "$(CONTENTS)/Info.plist" \
 	    --name "$(APP_NAME)" --bundle-id "$(BUNDLE_ID)" \
@@ -74,10 +89,11 @@ run: $(STAMP)
 # itself — this is where a bundle with a Python runtime and ffmpeg will bite.
 sign: $(STAMP)
 	@test -n "$(DEV_ID)" || { echo "DEV_ID is not set"; exit 1; }
+	# Batched, not one codesign per file: the embedded runtime has hundreds of
+	# .so files and every invocation costs a timestamp round-trip to Apple.
 	find "$(CONTENTS)" \( -name '*.dylib' -o -name '*.so' -o -perm -111 -type f \) \
 	    ! -path "$(CONTENTS)/MacOS/$(APP_NAME)" -print0 \
-	  | xargs -0 -I{} codesign --force --timestamp --options runtime \
-	      --sign "$(DEV_ID)" {}
+	  | xargs -0 codesign --force --timestamp --options runtime --sign "$(DEV_ID)"
 	codesign --force --timestamp --options runtime \
 	    --entitlements "$(HERE)$(APP_NAME).entitlements" \
 	    --sign "$(DEV_ID)" "$(APP)"
@@ -115,5 +131,9 @@ release: notarize
 	@echo
 	@echo "Ready to hand out: $(DMG)"
 
+# Keeps the runtime: rebuilding it means a 30 MB download and a pip run.
 clean:
+	rm -rf "$(APP)" "$(STAMP)" "$(BUILD)"/*.dmg "$(BUILD)"/*.zip "$(ICON)"
+
+distclean:
 	rm -rf "$(BUILD)" "$(ICON)"
