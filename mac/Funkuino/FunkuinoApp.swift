@@ -43,7 +43,7 @@ final class StudioServer: ObservableObject {
         }
     }
 
-    func start() {
+    func start(config: AppConfig, configDir: URL) {
         guard process == nil else { return }
         let port: UInt16
         do {
@@ -61,7 +61,8 @@ final class StudioServer: ObservableObject {
 
         let proc = Process()
         proc.executableURL = dispatcher
-        proc.arguments = ["studio", "--port", String(port), "--no-browser"]
+        proc.arguments = ["studio", "--port", String(port), "--no-browser",
+                          "--host", config.host]
         // A GUI app inherits a minimal PATH; give the child the usual locations
         // so it finds ffmpeg (Homebrew) until the bundle carries its own.
         var env = ProcessInfo.processInfo.environment
@@ -70,6 +71,10 @@ final class StudioServer: ObservableObject {
         // quit, this covers a crash, a force-quit or a signal that never reaches
         // applicationWillTerminate.
         env["FUNKUINO_EXIT_WITH_PARENT"] = "1"
+        // Resolved here so the child (and everything it spawns) agrees with the
+        // window the user just clicked through, whatever the defaults would say.
+        env["FUNKUINO_DATA_DIR"] = config.dataDir
+        env["FUNKUINO_CONFIG_DIR"] = configDir.path
         proc.environment = env
 
         do {
@@ -109,6 +114,7 @@ final class StudioServer: ObservableObject {
     func stop() {
         process?.terminate()
         process = nil
+        state = .starting
     }
 
     /// Ask the kernel for an unused port by binding to 0 and reading it back.
@@ -194,8 +200,25 @@ struct StudioWebView: NSViewRepresentable {
 struct RootView: View {
     @EnvironmentObject var server: StudioServer
     @EnvironmentObject var web: WebViewBox
+    @EnvironmentObject var configuration: Configuration
 
     var body: some View {
+        if configuration.needsSetup {
+            // No data folder yet (or the user asked to redo setup): the server
+            // has nothing to serve from, so it is not started at all.
+            SetupView()
+        } else {
+            serverView.onAppear(perform: startServer)
+        }
+    }
+
+    private func startServer() {
+        guard let config = configuration.config else { return }
+        server.start(config: config, configDir: configuration.directory)
+    }
+
+    @ViewBuilder
+    private var serverView: some View {
         switch server.state {
         case .starting:
             VStack(spacing: 12) {
@@ -252,17 +275,16 @@ struct FunkuinoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var server = StudioServer()
     @StateObject private var web = WebViewBox()
+    @StateObject private var configuration = Configuration()
 
     var body: some Scene {
         WindowGroup("Funkuino Studio") {
             RootView()
                 .environmentObject(server)
                 .environmentObject(web)
+                .environmentObject(configuration)
                 .frame(minWidth: 900, minHeight: 620)
-                .onAppear {
-                    delegate.server = server
-                    server.start()
-                }
+                .onAppear { delegate.server = server }
         }
         // No native title bar: it would show "Funkuino Studio" directly above the
         // page's own wordmark. The window's content now runs to the top edge and
@@ -274,6 +296,14 @@ struct FunkuinoApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Neu laden") { web.view?.reload() }
                     .keyboardShortcut("r", modifiers: .command)
+            }
+            CommandGroup(after: .appSettings) {
+                Button("Einrichtung ändern…") {
+                    // Stop first: the running server holds the old data folder,
+                    // and the setup screen is where a new one is chosen.
+                    server.stop()
+                    configuration.forceSetup = true
+                }
             }
         }
     }
