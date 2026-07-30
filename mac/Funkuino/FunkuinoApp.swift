@@ -287,11 +287,7 @@ struct RootView: View {
     private var serverView: some View {
         switch server.state {
         case .starting:
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Studio startet…").foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            StartingView()
         case .running(let url):
             // ?shell=mac tells the page it is inside this window, so its header
             // can take over the role of the (hidden) title bar. ignoresSafeArea
@@ -300,22 +296,44 @@ struct RootView: View {
             StudioWebView(url: URL(string: "?shell=mac", relativeTo: url) ?? url, box: web)
                 .ignoresSafeArea()
         case .failed(let message):
-            VStack(spacing: 16) {
-                Image(systemName: "exclamationmark.triangle").font(.largeTitle)
-                // Selectable: the tail of the server's own output is in here,
-                // and that is what gets pasted into a bug report.
-                Text(message)
-                    .multilineTextAlignment(.center)
-                    .textSelection(.enabled)
-                    .font(.callout.monospaced())
-                Button("Einrichtung ändern…") {
-                    server.stop()
-                    configuration.forceSetup = true
-                }
+            FailureView(message: message) {
+                server.stop()
+                configuration.forceSetup = true
             }
-            .padding(40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+// Own types, not inline cases: this is what `--snapshot` renders (Snapshot.swift),
+// which is the only way to look at these screens without sitting at the Mac.
+
+struct StartingView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Studio startet…").foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct FailureView: View {
+    let message: String
+    let onSetup: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+            // Selectable: the tail of the server's own output is in here, and
+            // that is what gets pasted into a bug report.
+            Text(message)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .font(.callout.monospaced())
+            Button("Einrichtung ändern…", action: onSetup)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -326,6 +344,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before anything else: render a screen to a file and quit.
+        if let request = Snapshot.requested() {
+            Snapshot.run(view: request.view, to: request.path)
+        }
+
         // A GUI app does not run applicationWillTerminate on SIGTERM, so a
         // `kill` would leave the server behind. Catch the signals we can.
         for sig in [SIGTERM, SIGINT] {
