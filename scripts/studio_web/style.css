@@ -632,13 +632,18 @@ body.scrolled #lib-head { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35); }
 .cards-head .backlog { flex: 1 1 220px; margin-top: 0; }
 .cards-head-actions { flex: 0 0 auto; }
 
+/* 19px = the panel above's inner padding (18px) plus its border, so this row
+   lines up with the text inside that box rather than with the box's edge. */
 .picker-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
-  flex: none; z-index: 20; padding: 8px 2px;
+  flex: none; z-index: 20; padding: 8px 19px;
   background: var(--paper); transition: box-shadow .2s var(--ease); }
 body.scrolled .picker-bar { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35); }
 .picker-count { font-size: 13px; color: var(--ink-soft); }
 .picker-count b { font-family: var(--font-display); font-size: 18px; color: var(--accent); }
 
+/* The zero state is a grid item; without this it is squeezed into one 128px
+   column and the sentence wraps a word per line. */
+.cards-grid .empty { grid-column: 1 / -1; }
 .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 12px;
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
   /* Keep every row at its natural (square) height: as a height-constrained

@@ -869,9 +869,12 @@ async function pingDevice() {
 
 /** @param {StatePayload} s */
 function renderCardsPanel(s) {
+  const b0 = s.cardsBacklog || {};
+  State.cardsBacklogEmpty = b0.newCovers === 0;
   setCardsRunning(!!(s.jobs && s.jobs.cards));
   const b = s.cardsBacklog || {};
   const n = b.newCovers != null ? b.newCovers : null;
+  State.cardsBacklogEmpty = n === 0;
   const per = b.perPage || 12;
   $("#backlog-num").textContent = n != null ? n : "–";
   if (n == null) {
@@ -900,6 +903,10 @@ function renderCardsPanel(s) {
 function setCardsRunning(running) {
   State.cardsRunning = running;
   ["cards-print", "cards-dry", "cards-undo"].forEach(id => { const el2 = /** @type {HTMLButtonElement|null} */ (document.getElementById(id)); if (el2) el2.disabled = running; });
+  // Nothing new to print is a real state, not a job lock: keep the button dead
+  // rather than let it run and report "0 new covers".
+  const print = /** @type {HTMLButtonElement|null} */ (document.getElementById("cards-print"));
+  if (print && !running && State.cardsBacklogEmpty) print.disabled = true;
   renderPickerBar();   // the picker's render buttons follow the same job lock
   renderPrintBar();    // and so does the Bibliothek print bar
 }
