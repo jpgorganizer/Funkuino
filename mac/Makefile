@@ -33,6 +33,7 @@ DMG         := $(BUILD)/$(APP_NAME)-$(VERSION).dmg
 
 SOURCES     := $(wildcard $(HERE)$(APP_NAME)/*.swift)
 RUNTIME     := $(BUILD)/runtime
+FFMPEG      := $(BUILD)/ffmpeg
 # What the app carries of this project: the dispatcher, the scripts, and the
 # instructions the embedded agent loads (its working directory is the user's
 # data folder, which has no CLAUDE.md of its own).
@@ -43,7 +44,7 @@ PYTHON      := $(CODE_ROOT)/.venv/bin/python
 DEV_ID         ?=
 NOTARY_PROFILE ?=
 
-.PHONY: all clean distclean run sign notarize dmg icon runtime release
+.PHONY: all clean distclean run sign notarize dmg icon runtime ffmpeg release
 
 all: $(STAMP)
 
@@ -59,12 +60,19 @@ $(RUNTIME):
 
 runtime: $(RUNTIME)
 
+# ~8 MB, built from source: there is no official macOS binary, and Homebrew's is
+# dynamically linked against 25 libraries and GPL-configured. See mac/ffmpeg.py.
+$(FFMPEG):
+	python3 $(HERE)ffmpeg.py --out "$(FFMPEG)"
+
+ffmpeg: $(FFMPEG)
+
 # One architecture, not universal: the embedded Python is single-architecture
 # (pip has to run the interpreter it installs into), so a universal shell would
 # only mean an Intel Mac launches the app and then fails at the first Python
 # call. Refusing to launch is the better failure. An Intel build is the same
 # `make release` run on an Intel Mac.
-$(STAMP): $(SOURCES) $(ICON) $(RUNTIME) $(MAKEFILE_LIST)
+$(STAMP): $(SOURCES) $(ICON) $(RUNTIME) $(FFMPEG) $(MAKEFILE_LIST)
 	rm -rf "$(APP)"
 	mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources"
 	swiftc -O -parse-as-library -target $(ARCH)-apple-macos$(MIN_MACOS) \
@@ -74,6 +82,7 @@ $(STAMP): $(SOURCES) $(ICON) $(RUNTIME) $(MAKEFILE_LIST)
 	cd "$(CODE_ROOT)" && rsync -a --delete --exclude '__pycache__' \
 	    $(CODE) "$(CONTENTS)/Resources/code/"
 	rsync -a --delete "$(RUNTIME)/" "$(CONTENTS)/Resources/code/runtime/"
+	rsync -a --delete "$(FFMPEG)/" "$(CONTENTS)/Resources/ffmpeg/"
 	$(PYTHON) "$(HERE)plist.py" \
 	    --out "$(CONTENTS)/Info.plist" \
 	    --name "$(APP_NAME)" --bundle-id "$(BUNDLE_ID)" \
@@ -131,7 +140,8 @@ release: notarize
 	@echo
 	@echo "Ready to hand out: $(DMG)"
 
-# Keeps the runtime: rebuilding it means a 30 MB download and a pip run.
+# Keeps the runtime and ffmpeg: rebuilding those means downloads and a
+# from-source build.
 clean:
 	rm -rf "$(APP)" "$(STAMP)" "$(BUILD)"/*.dmg "$(BUILD)"/*.zip "$(ICON)"
 

@@ -66,10 +66,14 @@ final class StudioServer: ObservableObject {
         proc.executableURL = dispatcher
         proc.arguments = ["studio", "--port", String(port), "--no-browser",
                           "--host", config.host]
-        // A GUI app inherits a minimal PATH; give the child the usual locations
-        // so it finds ffmpeg (Homebrew) until the bundle carries its own.
+        // A GUI app inherits a minimal PATH. The bundle's own ffmpeg comes
+        // first — a Homebrew one may be any build with any feature set — then
+        // the usual locations, so a machine without the bundled copy still works.
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+        let bundledTools = Bundle.main.resourceURL?.appendingPathComponent("ffmpeg").path
+        env["PATH"] = [bundledTools, "/opt/homebrew/bin", "/usr/local/bin",
+                       env["PATH"] ?? "/usr/bin:/bin"]
+            .compactMap { $0 }.joined(separator: ":")
         // Belt and braces against an orphaned server: stop() covers a normal
         // quit, this covers a crash, a force-quit or a signal that never reaches
         // applicationWillTerminate.
@@ -168,6 +172,11 @@ final class StudioServer: ObservableObject {
     /// ffmpeg is only needed for downloading and merging, so its absence is a
     /// warning rather than a blocked start — library, sync and printing work.
     static func findFFmpeg() -> String? {
+        if let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("ffmpeg/ffmpeg").path,
+           FileManager.default.isExecutableFile(atPath: bundled) {
+            return bundled
+        }
         for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
             let candidate = directory + "/ffmpeg"
             if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }

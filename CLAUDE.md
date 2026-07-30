@@ -64,7 +64,8 @@ Funkuino/
 ```
 
 External tools: **ffmpeg** (audio conversion/merge) and macOS **`say`** (spoken
-intros) must be on PATH; `id3v2` is not required. Python deps (incl. **Pillow**
+intros) must be on PATH; `id3v2` is not required. (The packaged app brings its
+own ffmpeg — see *macOS app*.) Python deps (incl. **Pillow**
 for the card sheets) come from `requirements.txt` in the venv.
 
 ### Commands: one dispatcher, two spellings
@@ -531,6 +532,15 @@ mac/icon.py                      # renders the icon from the wordmark's wave mot
   ships (245 MB — the SDK falls back to the user's own installation, which is
   the deliberate design: the agent is optional and its CLI is the user's to
   install). Kept across `make clean`; `make distclean` removes it.
+- **ffmpeg is built from source** (`mac/ffmpeg.py`, ~8 MB, ffmpeg 7.1.1 +
+  libmp3lame, both pinned by checksum): there is no official macOS binary, and
+  Homebrew's is dynamically linked against 25 libraries (57 MB) and configured
+  `--enable-gpl`. Ours is static, links only system frameworks, stays LGPL, and
+  enables exactly what prepare.py and yt-dlp call — **no network support**,
+  since yt-dlp downloads by itself and hands over local files. The bundle's
+  copy goes first on the child's PATH, ahead of any Homebrew build. Verified
+  against Homebrew's on the real pipelines (cover extract/embed/scale, concat
+  with `-c copy`, the spoken intro, m4a and webm/opus decode).
 - **One architecture per build.** pip has to run the interpreter it installs
   into, so the runtime is single-arch and the shell is built to match — a
   universal shell would only mean an Intel Mac launches and then fails at the
