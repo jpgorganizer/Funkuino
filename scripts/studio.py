@@ -658,6 +658,24 @@ class Studio:
         self.loop.create_task(self._run_cards(argv))
         return web.json_response({"started": True})
 
+    def _reveal_sheet(self, pdf: Path) -> None:
+        """Show a finished print sheet to the user (macOS Preview).
+
+        Not suppressed silently: if the hand-off fails the user is left waiting
+        for a window that never appears, so say so in the job log.
+        """
+        if sys.platform != "darwin" or not pdf.exists():
+            return
+        try:
+            result = subprocess.run(["/usr/bin/open", str(pdf)],
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                self.emit({"t": "cards.log",
+                           "line": f"Konnte {pdf.name} nicht öffnen: "
+                                   f"{result.stderr.strip() or result.returncode}"})
+        except Exception as exc:  # noqa: BLE001
+            self.emit({"t": "cards.log", "line": f"Konnte {pdf.name} nicht öffnen: {exc}"})
+
     async def _run_cards(self, argv: list[str]) -> None:
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -668,9 +686,18 @@ class Studio:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT)
             assert proc.stdout is not None
+            sheet: Path | None = None
             async for raw in proc.stdout:
-                self.emit({"t": "cards.log", "line": raw.decode(errors="replace").rstrip()})
+                line = raw.decode(errors="replace").rstrip()
+                # cards.py's own summary is the only handle on the file it wrote.
+                match = re.match(r"Wrote (.+\.pdf)\s", line)
+                if match:
+                    sheet = Path(match.group(1))
+                self.emit({"t": "cards.log", "line": line})
             code = await proc.wait()
+            # Same courtesy as the picker: a finished sheet opens for printing.
+            if code == 0 and sheet is not None and "--dry-run" not in argv:
+                self._reveal_sheet(sheet)
             self.emit({"t": "cards.done", "code": code})
         except Exception as exc:  # noqa: BLE001
             self.emit({"t": "cards.log", "line": f"FEHLER: {exc}"})
@@ -760,9 +787,7 @@ class Studio:
                  for r in rels]
         state.mark_run(items, str(out), time.strftime("%Y-%m-%d %H:%M:%S"))
         state.save()
-        if sys.platform == "darwin":
-            with contextlib.suppress(Exception):
-                subprocess.run(["open", str(out)], check=False)
+        self._reveal_sheet(out)
         return {"out": str(out), "pages": len(pages), "cards": len(rels)}
 
     # -- targeted per-unit upload --
