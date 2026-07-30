@@ -51,9 +51,30 @@
 
   <!-- ================= Agent ================= -->
   <section id="tab-agent" class="tabpane" role="tabpanel">
-    <div id="agent-unavailable" class="agent-hint" hidden>
-      <div class="big">Agent nicht verfügbar</div>
-      <div id="agent-unavailable-msg">Der Claude-Agent ist derzeit nicht erreichbar.</div>
+    <div id="agent-unavailable" class="agent-setup" hidden>
+      <div class="big">Agent einrichten</div>
+      <p id="agent-unavailable-msg">Der Claude-Agent ist noch nicht eingerichtet.</p>
+      <ol class="agent-steps">
+        <li>
+          <b>Claude Code installieren</b> — der Agent nutzt deine eigene
+          Installation.
+          <div class="agent-cli-state" id="agent-cli-state"></div>
+        </li>
+        <li>
+          <b>Zugangstoken erzeugen</b> — im Terminal:
+          <code>claude setup-token</code>. Braucht ein Claude-Abo, gilt etwa ein
+          Jahr.
+        </li>
+        <li>
+          <b>Token hier einsetzen</b> — er landet in der <code>.env</code> deines
+          Datenordners, nicht im Programm.
+          <div class="agent-token-row">
+            <input id="agent-token" class="input" type="password"
+                   placeholder="sk-ant-oat…" autocomplete="off" spellcheck="false">
+            <button id="agent-token-save" class="btn primary">Speichern</button>
+          </div>
+        </li>
+      </ol>
     </div>
 
     <div id="agent-live" class="agent-grid" hidden>

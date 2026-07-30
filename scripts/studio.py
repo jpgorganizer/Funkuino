@@ -30,6 +30,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -93,6 +94,46 @@ def _sync_summary(stats, elapsed: float, dry_run: bool) -> str:
         parts.append(f"{stats.failed} fehlgeschlagen")
     line = f"Fertig in {_de_secs(elapsed)} s: " + ", ".join(parts)
     return line + " — Dry-Run" if dry_run else line
+
+
+# Where the Claude Code CLI installs itself. The agent SDK searches the same
+# places; we look too, so the setup screen can say whether it is there at all
+# instead of only reporting a missing token.
+CLI_LOCATIONS = (
+    Path.home() / ".local/bin/claude",
+    Path("/usr/local/bin/claude"),
+    Path("/opt/homebrew/bin/claude"),
+    Path.home() / ".claude/local/claude",
+    Path.home() / ".npm-global/bin/claude",
+)
+
+
+def find_claude_cli() -> str | None:
+    found = shutil.which("claude")
+    if found:
+        return found
+    return next((str(p) for p in CLI_LOCATIONS if p.is_file()), None)
+
+
+def write_env_value(path: Path, key: str, value: str | None) -> None:
+    """Set (or drop) one KEY=VALUE in a .env, leaving the other lines alone.
+
+    The token is a credential, so the file is created 0600 — it would otherwise
+    inherit a world-readable default.
+    """
+    lines = []
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        pass
+    kept = [ln for ln in lines
+            if not ln.strip().startswith(f"{key}=") and not ln.strip().startswith(f"{key} =")]
+    if value:
+        kept.append(f"{key}={value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(kept).strip() + "\n")
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
 
 
 def parse_env(path: Path) -> dict[str, str]:
@@ -559,9 +600,15 @@ class Studio:
                         "host": self.cfg.host})
         available = bool(self.agent and self.agent.available)
         agent = {"available": available,
-                 "sessions": self.agent.summaries() if self.agent else []}
+                 "sessions": self.agent.summaries() if self.agent else [],
+                 # Both halves of the setup, so the UI can name what is missing
+                 # rather than pointing at a file the user never created.
+                 "tokenSet": bool(self.token),
+                 "cli": find_claude_cli()}
         if not available:
-            agent["reason"] = "SDK_TOKEN fehlt in .env"
+            agent["reason"] = ("Kein Zugangstoken hinterlegt."
+                               if agent["cli"] else
+                               "Claude Code CLI nicht gefunden und kein Token hinterlegt.")
         return web.json_response({
             "units": units,
             "syncManifest": manifest,
@@ -1054,6 +1101,32 @@ class Studio:
                 {"ok": False, "error": "Anfrage nicht mehr offen"}, status=409)
         return web.json_response({"ok": True})
 
+    async def h_agent_token(self, request: web.Request) -> web.Response:
+        """Store (or clear) the agent's access token from the UI.
+
+        It lands in the data folder's .env, the same place the server reads at
+        start, so a token entered in the app is there for the terminal tools and
+        survives a restart. Applying it to the live SessionManager as well means
+        no restart is needed — existing sessions keep the token they started
+        with, new ones get this one.
+        """
+        body = await _json_body(request)
+        token = str(body.get("token") or "").strip()
+        try:
+            write_env_value(espuino.data_or_repo(".env"), "SDK_TOKEN", token or None)
+        except OSError as exc:
+            return web.json_response({"error": f"Konnte .env nicht schreiben: {exc}"},
+                                     status=500)
+        self.token = token or None
+        if self.agent is not None:
+            self.agent.token = self.token
+        if token:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        else:
+            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        self.emit({"t": "state.changed"})
+        return web.json_response({"ok": True, "available": bool(self.token)})
+
     async def h_agent_interrupt(self, request: web.Request) -> web.Response:
         guard = self._agent_ready()
         if guard is not None:
@@ -1162,6 +1235,7 @@ class Studio:
         app.router.add_get("/api/rfid/assignments", self.h_rfid_assignments)
         app.router.add_post("/api/rfid/assign", self.h_rfid_assign)
         app.router.add_post("/api/rfid/unassign", self.h_rfid_unassign)
+        app.router.add_post("/api/agent/token", self.h_agent_token)
         app.router.add_post("/api/agent/sessions", self.h_agent_create)
         app.router.add_get("/api/agent/sessions/{sid}/events", self.h_agent_events)
         app.router.add_post("/api/agent/sessions/{sid}/message", self.h_agent_message)

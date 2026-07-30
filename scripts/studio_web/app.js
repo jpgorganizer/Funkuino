@@ -1019,9 +1019,39 @@ function renderAgentAvailability(agent) {
   Agent.available = !!(agent && agent.available);
   $("#agent-unavailable").hidden = Agent.available;
   $("#agent-live").hidden = !Agent.available;
-  if (!Agent.available && agent && agent.reason) $("#agent-unavailable-msg").textContent = agent.reason;
-  else if (!Agent.available) $("#agent-unavailable-msg").textContent = "SDK_TOKEN fehlt in .env. Agent-Funktionen sind deaktiviert.";
+  $("#agent-unavailable-msg").textContent =
+    (agent && agent.reason) || "Der Claude-Agent ist noch nicht eingerichtet.";
+  const cli = agent && agent.cli;
+  $("#agent-cli-state").textContent = cli
+    ? "Gefunden: " + cli
+    : "Nicht gefunden — Installationsanleitung: claude.com/claude-code";
+  $("#agent-cli-state").classList.toggle("missing", !cli);
+
+  // The URL intake in the library is the agent's front door: without it the
+  // field would accept a URL and then fail with a toast.
+  const url = $("#lib-url"), load = $("#lib-load");
+  if (url && load) {
+    url.disabled = load.disabled = !Agent.available;
+    url.placeholder = Agent.available
+      ? "URL zum Laden…" : "URL zum Laden — Agent einrichten";
+    const hint = Agent.available ? "" : "Zum Laden von URLs den Agenten einrichten (Tab „Agent“).";
+    url.title = load.title = hint;
+  }
   updateComposerState();
+}
+
+async function saveAgentToken() {
+  const field = $("#agent-token");
+  const value = (field.value || "").trim();
+  if (!value) { toast("Bitte zuerst den Token einsetzen."); return; }
+  try {
+    await api("/api/agent/token", "POST", { token: value });
+    field.value = "";
+    toast("Token gespeichert.");
+    refreshState();
+  } catch (e) {
+    toast("Konnte den Token nicht speichern.");
+  }
 }
 
 /** @param {SessionInfo[]} list */
@@ -1772,6 +1802,8 @@ function initLibrary() {
   $("#lib-refresh").addEventListener("click", () => refreshState(true));
   $("#lib-load").addEventListener("click", () => startLibraryDownload($("#lib-url").value));
   $("#lib-url").addEventListener("keydown", (/** @type {any} */ e) => { if (e.key === "Enter") startLibraryDownload(e.target.value); });
+  $("#agent-token-save").addEventListener("click", saveAgentToken);
+  $("#agent-token").addEventListener("keydown", (/** @type {any} */ e) => { if (e.key === "Enter") saveAgentToken(); });
 }
 
 function initRfid() {

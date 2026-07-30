@@ -477,6 +477,23 @@ body.scrolled #lib-head { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35); }
 .status-line .dotpulse { color: var(--accent); }
 
 .agent-hint { text-align: center; padding: 60px 24px; color: var(--ink-soft); }
+
+/* Setup instead of a dead end: the agent needs two things the app cannot
+   provide itself — the user's own Claude Code CLI and their token. */
+.agent-setup { max-width: 640px; margin: 40px auto; color: var(--ink-soft); }
+.agent-setup .big { font-family: var(--font-display); font-size: 22px; color: var(--ink); }
+.agent-setup p { margin: 6px 0 18px; }
+.agent-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 16px; }
+.agent-steps li { line-height: 1.55; }
+.agent-steps b { color: var(--ink); font-weight: 600; }
+.agent-steps code {
+  font-family: var(--font-mono); font-size: 12.5px;
+  background: var(--surface-2); border-radius: 5px; padding: 1px 6px;
+}
+.agent-cli-state { font-family: var(--font-mono); font-size: 12px; margin-top: 4px; color: var(--ink-faint); }
+.agent-cli-state.missing { color: var(--warn); }
+.agent-token-row { display: flex; gap: 8px; margin-top: 8px; }
+.agent-token-row .input { flex: 1; }
 .agent-hint .big { font-family: var(--font-display); font-size: 20px; color: var(--ink); margin-bottom: 8px; }
 .agent-hint code { font-family: var(--font-mono); background: var(--surface-2); padding: 2px 6px; border-radius: 4px; }
 
