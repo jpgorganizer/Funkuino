@@ -38,21 +38,24 @@ class PrintState:
         # entry that key had *before* the run (None if it was newly marked), so a
         # run can be reverted exactly. Newest run last.
         self.runs = runs if runs is not None else []
+        self.load_status = "missing"   # see espuino.read_json_state
+        self.backed_up = False         # one previous-good copy per run
 
     @classmethod
     def load(cls, state_file: Path) -> "PrintState":
-        try:
-            data = json.loads(Path(state_file).read_text())
-        except (FileNotFoundError, ValueError):
-            data = {}
-        return cls(Path(state_file), data.get("printed", {}), data.get("runs", []))
+        data, status = espuino.read_json_state(Path(state_file))
+        state = cls(Path(state_file), data.get("printed", {}), data.get("runs", []))
+        state.load_status = status
+        return state
 
     def save(self) -> None:
         espuino.ensure_status_dir()
+        if not self.backed_up:
+            espuino.keep_backup(self.path)
+            self.backed_up = True
         payload = {"printed": self.printed, "runs": self.runs}
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-        tmp.replace(self.path)
+        espuino.write_text_atomically(
+            self.path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
     def mark_run(self, items: list[tuple[str, int, float]], out: str | None,
                  when: str) -> None:

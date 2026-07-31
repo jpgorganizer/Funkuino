@@ -36,30 +36,30 @@ class SyncState:
     device_id: str = ""  # MAC address (stable per device)
     host: str = ""       # last host label used to reach it
     files: dict[str, dict] = field(default_factory=dict)
+    load_status: str = "missing"   # see espuino.read_json_state
+    backed_up: bool = False        # one previous-good copy per run
 
     @classmethod
     def load(cls, state_dir: str | Path, device_id: str, host: str = "") -> "SyncState":
         """Load (or start) the manifest for ``device_id`` inside ``state_dir``."""
         path = Path(state_dir) / f"sync-{_slug(device_id)}.json"
-        if path.is_file():
-            try:
-                data = json.loads(path.read_text())
-                return cls(
-                    path=path,
-                    device_id=data.get("device_id", device_id),
-                    host=host or data.get("host", ""),
-                    files=data.get("files", {}),
-                )
-            except (ValueError, OSError):
-                pass  # corrupt/unreadable -> start fresh
-        return cls(path=path, device_id=device_id, host=host)
+        data, status = espuino.read_json_state(path)
+        return cls(
+            path=path,
+            device_id=data.get("device_id", device_id),
+            host=host or data.get("host", ""),
+            files=data.get("files", {}),
+            load_status=status,
+        )
 
     def save(self) -> None:
         espuino.ensure_status_dir()
+        if not self.backed_up:
+            espuino.keep_backup(self.path)
+            self.backed_up = True
         payload = {"device_id": self.device_id, "host": self.host, "files": self.files}
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=1, ensure_ascii=False))
-        tmp.replace(self.path)  # atomic
+        espuino.write_text_atomically(
+            self.path, json.dumps(payload, indent=1, ensure_ascii=False))
 
     def get(self, remote_path: str) -> dict | None:
         return self.files.get(remote_path)

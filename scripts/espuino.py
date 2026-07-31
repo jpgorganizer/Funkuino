@@ -40,6 +40,7 @@ import fnmatch
 import json
 import os
 import posixpath
+import shutil
 import socket
 import time
 import unicodedata
@@ -147,6 +148,81 @@ bitte mitnehmen.
 Verloren ist nichts, wenn er fehlt: der nächste Abgleich lädt dann alles erneut
 auf das Gerät, und im Kartendruck gelten wieder alle Cover als ungedruckt.
 """
+
+
+def write_text_atomically(path: Path, text: str) -> None:
+    """Replace a file's contents so a power cut cannot leave a half-file.
+
+    Writing to a temp file and renaming is only half of it: the rename can
+    reach the disk before the data does, and what survives a power cut is then
+    an EMPTY file where the manifest used to be. fsync the temp file before the
+    rename and the directory after it, so the order is guaranteed rather than
+    hoped for. (On a network volume neither guarantee is worth much — that is
+    the filesystem's business, not ours.)
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    tmp.replace(path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def keep_backup(path: Path) -> None:
+    """Copy the current state file aside as ``.bak`` — once per run.
+
+    Losing a manifest is not data loss, but it does cost a full re-upload or a
+    reprint of every card. One previous-good copy turns the worst case into
+    "the last run is missing" instead.
+    """
+    if path.is_file():
+        with contextlib.suppress(OSError):
+            shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+
+
+def read_json_state(path: Path) -> tuple[dict, str]:
+    """Load a state file. Returns ``(data, status)``.
+
+    status is ``ok``, ``missing``, ``recovered`` (the file was unreadable and
+    the backup stood in) or ``lost`` (unreadable, no usable backup).
+
+    A broken file is never simply ignored: the old behaviour started fresh and
+    then overwrote the evidence with an empty manifest on the next save, so a
+    corrupted state looked exactly like a new installation. It is moved aside
+    instead, and the caller is told so it can say something.
+    """
+    if not path.is_file():
+        return {}, "missing"
+    try:
+        return json.loads(path.read_text()), "ok"
+    except (ValueError, OSError):
+        pass
+    with contextlib.suppress(OSError):
+        path.replace(path.with_suffix(path.suffix + f".corrupt-{int(time.time())}"))
+    backup = path.with_suffix(path.suffix + ".bak")
+    if backup.is_file():
+        try:
+            return json.loads(backup.read_text()), "recovered"
+        except (ValueError, OSError):
+            pass
+    return {}, "lost"
+
+
+def state_warning(kind: str, status: str) -> str | None:
+    """A sentence for a state file that did not load cleanly, or None."""
+    if status == "recovered":
+        return (f"{kind} war beschädigt und wurde aus der Sicherung "
+                "wiederhergestellt. Die letzte Sitzung fehlt darin evtl.")
+    if status == "lost":
+        return (f"{kind} war beschädigt und ließ sich nicht wiederherstellen "
+                "— die beschädigte Datei liegt daneben (.corrupt-…).")
+    return None
 
 
 def ensure_status_dir() -> Path:

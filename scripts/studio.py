@@ -658,6 +658,9 @@ class Studio:
                 device_id = mac or self.cfg.host
                 state = SyncState.load(sync.STATE_DIR, device_id=device_id,
                                        host=self.cfg.host)
+                if w := espuino.state_warning("Der Abgleichstand",
+                                              state.load_status):
+                    self.emit({"t": "sync.log", "line": f"WARNUNG: {w}"})
 
                 def log(line: str) -> None:
                     self.emit_threadsafe({"t": "sync.log", "line": line})

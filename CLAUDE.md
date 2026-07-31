@@ -100,6 +100,20 @@ and a lost `status/` means re-uploading everything and reprinting every card
 the sync manifest is rewritten twice per uploaded file, and that write must not
 be able to take the print history with it.
 
+**Durability** (`espuino.write_text_atomically` / `keep_backup` /
+`read_json_state`): temp file + rename is only half of it — the rename can
+reach disk before the data, and a power cut then leaves an *empty* file where
+the manifest was. So the temp file is fsynced before the rename and the
+directory after it. Each run keeps one previous-good `.bak`, and a file that
+does not parse is moved aside as `.corrupt-<ts>` rather than silently ignored:
+the old code started fresh and overwrote the evidence on the next save, so a
+corrupted manifest was indistinguishable from a new installation while quietly
+re-uploading the whole library. Callers report the outcome (`load_status`,
+`espuino.state_warning`). SQLite was considered and rejected: it drops `-wal` /
+`-shm` siblings next to the file (the very thing a hand-copied library loses),
+makes the state unreadable to the user, and would still need the pending-marker
+semantics modelled by hand.
+
 The **credentials do not live in the library**: `credentials.env` (`SDK_TOKEN=…`)
 sits next to `config.json` in the config directory, because a media library gets
 copied, shared and backed up and a token should not ride along. `.env` in the

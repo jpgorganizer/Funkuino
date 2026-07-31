@@ -215,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         p = Path(args.path)
         root = p if p.is_absolute() else covers_dir / args.path
     state = PrintState.load(STATE_FILE)
+    if warning := espuino.state_warning("Der Druckverlauf", state.load_status):
+        print(f"WARNUNG: {warning}")
 
     if args.reset:
         rel = "" if not args.path else str(Path(root).resolve().relative_to(covers_dir.resolve()))

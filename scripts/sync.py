@@ -231,6 +231,10 @@ def main(argv: list[str] | None = None) -> int:
         print("DRY RUN - no changes will be made.\n")
 
     state = SyncState.load(STATE_DIR, device_id=device_id, host=cfg.host)
+    if warning := espuino.state_warning("Der Abgleichstand", state.load_status):
+        # Loud: without it every file counts as new and the whole library is
+        # uploaded again, which looks like a bug rather than a recovery.
+        print(f"WARNUNG: {warning}")
 
     start = time.monotonic()
     try:
