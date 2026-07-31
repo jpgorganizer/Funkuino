@@ -31,12 +31,14 @@ def pick_manifest(state_dir: str | Path) -> tuple[SyncState | None, dict | None]
     Returns ``(state, meta)`` where meta is ``{host, deviceId, fileMtime}``, or
     ``(None, None)`` if no manifest exists yet (fresh checkout / never synced)."""
     state_dir = Path(state_dir)
-    candidates = sorted(state_dir.glob("*.json"),
+    # `sync-<mac>.json`, not every .json: the status folder holds the print
+    # history as well, and picking that up would report "never synced".
+    candidates = sorted(state_dir.glob("sync-*.json"),
                         key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
         return None, None
     newest = candidates[0]
-    state = SyncState.load(state_dir, device_id=newest.stem)
+    state = SyncState.load(state_dir, device_id=newest.stem.removeprefix("sync-"))
     meta = {"host": state.host, "deviceId": state.device_id,
             "fileMtime": newest.stat().st_mtime}
     return state, meta

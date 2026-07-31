@@ -205,7 +205,7 @@ struct SetupView: View {
         do {
             // Create the layout the tools expect, so the first sync or download
             // does not fail on a missing directory.
-            for sub in ["files", "card-covers", "print-sheets"] {
+            for sub in ["files", "card-covers", "print-sheets", "status"] {
                 try FileManager.default.createDirectory(
                     at: url.appendingPathComponent(sub), withIntermediateDirectories: true)
             }

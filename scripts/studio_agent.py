@@ -474,7 +474,8 @@ class SessionManager:
 
         # The can_use_tool callback is a bound method, so the session must exist
         # before the options/client that reference it.
-        progress_file = espuino.DATA_ROOT / f".studio-progress-{sid}.json"
+        espuino.APP_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        progress_file = espuino.APP_CONFIG_DIR / f"progress-{sid}.json"
         with contextlib.suppress(OSError):
             progress_file.unlink()  # drop any stale file from a crashed run
         session = Session(id=sid, kind=kind, model=model, label=label,

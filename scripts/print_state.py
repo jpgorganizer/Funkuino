@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 import unicodedata
 from pathlib import Path
+
+import espuino
 from typing import Iterable
 
 
@@ -46,7 +48,7 @@ class PrintState:
         return cls(Path(state_file), data.get("printed", {}), data.get("runs", []))
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        espuino.ensure_status_dir()
         payload = {"printed": self.printed, "runs": self.runs}
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))

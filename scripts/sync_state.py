@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import espuino
+
 
 def _slug(value: str) -> str:
     """Filesystem-safe filename component (MAC address, host, …)."""
@@ -38,7 +40,7 @@ class SyncState:
     @classmethod
     def load(cls, state_dir: str | Path, device_id: str, host: str = "") -> "SyncState":
         """Load (or start) the manifest for ``device_id`` inside ``state_dir``."""
-        path = Path(state_dir) / f"{_slug(device_id)}.json"
+        path = Path(state_dir) / f"sync-{_slug(device_id)}.json"
         if path.is_file():
             try:
                 data = json.loads(path.read_text())
@@ -53,7 +55,7 @@ class SyncState:
         return cls(path=path, device_id=device_id, host=host)
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        espuino.ensure_status_dir()
         payload = {"device_id": self.device_id, "host": self.host, "files": self.files}
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=1, ensure_ascii=False))

@@ -22,18 +22,14 @@ CLAUDE.local.md
 # data folder, which is the checkout unless configured otherwise
 extensions/
 
-# Per-device upload manifests (device/machine-specific)
-.sync-state/
+# Sync + print manifests (per library, visible to the user)
+status/
 
 # Printable cover images (local, derived from downloads)
 card-covers/
 
-# Generated print sheets and the print manifest (local, derived from card-covers)
+# Generated print sheets (local, derived from card-covers)
 print-sheets/
-.print-state.json
-
-# Transient per-agent-session intake progress files (Funkuino Studio)
-.studio-progress-*
 
 # macOS app build output and the generated icon (mac/icon.py rebuilds it)
 mac/build/

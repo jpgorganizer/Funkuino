@@ -58,9 +58,7 @@ Funkuino/
   print-sheets/         # git-ignored; generated printable PDFs
   requirements.txt      # requests, websocket-client, yt-dlp, Pillow, aiohttp, claude-agent-sdk
   .venv/                # git-ignored; created from requirements.txt
-  .env                  # git-ignored; SDK_TOKEN=… (from `claude setup-token`) for the Studio agent
-  .sync-state/          # git-ignored; per-device manifests (<mac>.json)
-  .print-state.json     # git-ignored; which covers have been printed
+  status/               # git-ignored; sync-<mac>.json + print-history.json + README.txt
 ```
 
 External tools: **ffmpeg** (audio conversion/merge) and macOS **`say`** (spoken
@@ -94,9 +92,20 @@ cannot generalise to `funkuino sync`.
 `espuino.REPO_ROOT` is where the **code** lives (wrappers, scripts, Studio web
 assets) — read-only in a packaged app, so nothing may be written below it.
 `espuino.DATA_ROOT` is where the **user's stuff** lives and is what everything
-else derives from: `files/`, `card-covers/`, `print-sheets/`, `.sync-state/`,
-`.print-state.json`, `.env`, `.agent-allow.json`, `CLAUDE.local.md`, and the
-agent session's cwd. It resolves as **`FUNKUINO_DATA_DIR` > app config file
+else derives from: `files/`, `card-covers/`, `print-sheets/`, `status/`,
+`extensions/`, `CLAUDE.local.md`, and the agent session's cwd. **Nothing in it
+is hidden**: someone copying a library by hand takes the folders they can see,
+and a lost `status/` means re-uploading everything and reprinting every card
+(it says so in its own README.txt). Its two manifests stay separate files —
+the sync manifest is rewritten twice per uploaded file, and that write must not
+be able to take the print history with it.
+
+The **credentials do not live in the library**: `credentials.env` (`SDK_TOKEN=…`)
+sits next to `config.json` in the config directory, because a media library gets
+copied, shared and backed up and a token should not ride along. `.env` in the
+data folder or the checkout is still read if present, for older setups.
+Transient per-session progress files live there too, not in the user's music
+folder. It resolves as **`FUNKUINO_DATA_DIR` > app config file
 (`config.json`, `{"data_dir": …}`, in `FUNKUINO_CONFIG_DIR` or
 `~/Library/Application Support/Funkuino`) > the checkout**.
 
@@ -163,7 +172,7 @@ One-way mirror `files/ -> device`, rsync-style:
 
 1. **Existence** comes from a fast recursive HTTP directory listing.
 2. **Change detection** comes from a local per-device manifest
-   (`.sync-state/<mac>.json`) recording the size+mtime of each file we last
+   (`status/sync-<mac>.json`) recording the size+mtime of each file we last
    uploaded — the device offers no cheap way to read a remote file's size.
 3. New and changed files are uploaded (strictly one at a time). `--delete`
    removes device files/dirs absent locally (with a guard: it refuses if the
@@ -190,7 +199,7 @@ therefore scaled to the file size (≥40 KiB/s floor) — needed for the ~30–4
 Hörspiel files. Observed throughput is ~700–800 KiB/s.
 
 **Device identity:** each sync first calls `/info` and keys the manifest by the
-device's **MAC address** (`.sync-state/<mac>.json`), not the host name. So the
+device's **MAC address** (`status/sync-<mac>.json`), not the host name. So the
 same physical device reached as `espuino.local` or by IP shares one manifest,
 and two different ESPuinos get independent manifests automatically — just run
 `./sync --host A` and `./sync --host B` (give the second device a distinct
@@ -291,9 +300,9 @@ cut it into square cards.
   **trims the uniform bars and centre-crops to a square** (`prepare_card` →
   `_trim_uniform_border` + `_centre_square`), reproducing the manual crop. The
   title text is inside the square, so it survives; the bars are only left/right.
-- **Manifest (`.print-state.json`, `print_state.py`).** Printing is
-  device-independent (a card maps to a *file*), so there is a single manifest at
-  the repo root — not one per device like sync. It records size+mtime per printed
+- **Manifest (`status/print-history.json`, `print_state.py`).** Printing is
+  device-independent (a card maps to a *file*), so there is a single manifest
+  next to the sync ones — not one per device like sync. It records size+mtime per printed
   cover. This is what makes **`./cards` with no arguments print only what's new**:
   a cover counts as new if it is absent from the manifest or changed. A real run
   marks the covers it placed as printed; the next plain `./cards` picks up only
@@ -345,7 +354,7 @@ cards), **Agent**, **Sync** (mirror with live log; Dry-Run always previews
   compilations like `Kinderweihnacht` that lack the `Artist - Album` name form);
   the marker is in `espuino.IGNORE_PATTERNS`, so it never syncs to the device.
   Pipeline status comes from the existing manifests only — sync from the newest
-  `.sync-state/*.json`, print from `.print-state.json`, covers from
+  `status/sync-*.json`, print from `status/print-history.json`, covers from
   `card-covers/` — Studio adds no state files of its own.
 - **RFID assignment lives in the Bibliothek**: Studio keeps a passive, persistent
   websocket to the device (3 s `{"ping":{"ping":"ping"}}` keepalive, reconnect
@@ -359,7 +368,7 @@ cards), **Agent**, **Sync** (mirror with live log; Dry-Run always previews
   `scripts/progress.py`); Studio sets it per agent session and streams the
   polled snapshots to the intake strip as a real per-track progress bar.
 - **The agent is the Claude Agent SDK** (`claude-agent-sdk`), authenticated with
-  the subscription token in the git-ignored `.env` (`SDK_TOKEN=…`, created with
+  the subscription token in `credentials.env` (`SDK_TOKEN=…`, created with
   `claude setup-token`, valid ~1 year — recreate it when sessions fail with auth
   errors). Sessions run in this repo with this CLAUDE.md loaded
   (`setting_sources=["project"]`); pasting a URL starts the guided intake flow

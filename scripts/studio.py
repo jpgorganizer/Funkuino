@@ -1113,7 +1113,8 @@ class Studio:
         body = await _json_body(request)
         token = str(body.get("token") or "").strip()
         try:
-            write_env_value(espuino.data_or_repo(".env"), "SDK_TOKEN", token or None)
+            write_env_value(espuino.APP_CONFIG_DIR / "credentials.env",
+                            "SDK_TOKEN", token or None)
         except OSError as exc:
             return web.json_response({"error": f"Konnte .env nicht schreiben: {exc}"},
                                      status=500)
@@ -1167,7 +1168,7 @@ class Studio:
             self.token, self.emit_agent, self.loop,
             sync_active=lambda: self.sync_running)
         self._ws_session = aiohttp.ClientSession()
-        for stale in espuino.DATA_ROOT.glob(".studio-progress-*"):
+        for stale in espuino.APP_CONFIG_DIR.glob("progress-*.json"):
             with contextlib.suppress(OSError):
                 stale.unlink()  # leftovers from a previous run
         await self.rescan()
@@ -1287,7 +1288,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Do not open a browser tab on start")
     args = parser.parse_args(argv)
 
-    token = parse_env(espuino.data_or_repo(".env")).get("SDK_TOKEN")
+    token = parse_env(espuino.credentials_file()).get("SDK_TOKEN")
     if token:
         # So the Agent SDK subprocess inherits it even if not passed explicitly.
         os.environ.setdefault("CLAUDE_CODE_OAUTH_TOKEN", token)

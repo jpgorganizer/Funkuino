@@ -35,6 +35,7 @@ available, so we use it exclusively.
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import json
 import os
@@ -53,10 +54,6 @@ import requests
 # below it — user data goes to DATA_ROOT instead.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Where the *data* lives: the media library, covers, print sheets and the
-# manifests. Defaults to the checkout (so a plain `git clone` behaves exactly as
-# before) but can point anywhere — an external disk, or the folder a packaged
-# app was configured with.
 def _default_config_dir() -> Path:
     return (Path.home() / "Library" / "Application Support" / "Funkuino"
             if os.uname().sysname == "Darwin" else
@@ -73,7 +70,9 @@ APP_CONFIG_FILE = APP_CONFIG_DIR / "config.json"
 
 
 def _resolve_data_root() -> Path:
-    """FUNKUINO_DATA_DIR > app config file > the checkout.
+    """Where the *data* lives: library, covers, print sheets, status.
+
+    FUNKUINO_DATA_DIR > app config file > the checkout.
 
     The config file is the app's channel: it is written by the GUI's settings
     pane and read here, so `./sync` from a terminal and the app operate on the
@@ -90,6 +89,22 @@ def _resolve_data_root() -> Path:
 
 
 DATA_ROOT = _resolve_data_root()
+
+
+def credentials_file() -> Path:
+    """Where the agent's token lives: with the installation, not the library.
+
+    A media library gets copied, backed up and handed around; a credential
+    should not ride along in it. Older locations are still honoured so an
+    existing checkout keeps working.
+    """
+    primary = APP_CONFIG_DIR / "credentials.env"
+    if primary.exists():
+        return primary
+    for legacy in (DATA_ROOT / ".env", REPO_ROOT / ".env"):
+        if legacy.exists():
+            return legacy
+    return primary
 
 
 def data_or_repo(name: str) -> Path:
@@ -110,11 +125,40 @@ DEFAULT_REMOTE_ROOT = "/"
 # Full-resolution title images (for printing RFID cards) live here, mirroring the
 # files/ layout. Not uploaded (the device has no display); see IGNORE_PATTERNS.
 DEFAULT_COVERS_DIR = DATA_ROOT / "card-covers"
-# Printable A4 sheets (cards.py) and the two manifests. All under DATA_ROOT so a
+# Printable A4 sheets (cards.py) and the manifests. All under DATA_ROOT so a
 # configured data folder carries the full state: library, covers, history.
 PRINT_SHEETS_DIR = DATA_ROOT / "print-sheets"
-PRINT_STATE_FILE = DATA_ROOT / ".print-state.json"
-SYNC_STATE_DIR = DATA_ROOT / ".sync-state"
+# Deliberately not hidden: someone copying a library by hand picks the folders
+# they can see, and losing this one silently means re-uploading everything and
+# reprinting every card. One visible folder to take along — but still separate
+# files inside, because the sync manifest is rewritten twice per uploaded file
+# (the pending marker is what makes an interrupted upload safe) and must not
+# share a file with anything else.
+STATUS_DIR = DATA_ROOT / "status"
+PRINT_STATE_FILE = STATUS_DIR / "print-history.json"
+SYNC_STATE_DIR = STATUS_DIR
+
+STATUS_README = """Dieser Ordner gehört zur Funkuino-Mediathek.
+
+Hier merkt sich Funkuino, was bereits auf welchem ESPuino liegt und welche
+Karten schon gedruckt sind. Beim Verschieben oder Sichern der Mediathek also
+bitte mitnehmen.
+
+Verloren ist nichts, wenn er fehlt: der nächste Abgleich lädt dann alles erneut
+auf das Gerät, und im Kartendruck gelten wieder alle Cover als ungedruckt.
+"""
+
+
+def ensure_status_dir() -> Path:
+    """Create the status folder, with the note that explains what it is."""
+    STATUS_DIR.mkdir(parents=True, exist_ok=True)
+    readme = STATUS_DIR / "README.txt"
+    if not readme.exists():
+        with contextlib.suppress(OSError):
+            readme.write_text(STATUS_README)
+    return STATUS_DIR
+
+
 HTTP_PORT = 80
 
 # Web-interface control command codes (firmware src/values.h), sent over the
