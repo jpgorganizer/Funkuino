@@ -19,7 +19,38 @@ there is nothing to install first.
 
 *Screenshots show a fictional demo library.*
 
-## Features
+## Funkuino Studio
+
+Studio is a dashboard covering the entire pipeline per card — Download ·
+Cover · Sync · Print · RFID — where the status boxes are also the actions:
+click a unit's sync box to upload it, select covers for printing via a floating
+print bar, assign RFID cards straight from the library view.
+
+- **Live RFID assignment:** Studio keeps a passive websocket to the device and
+  hears every card placement. Put an unknown card on the box, click the row it
+  should belong to — assigned (with sensible play-mode defaults per content
+  type).
+- **Integrated card printing** with the same manifest and `--undo` semantics as
+  the command line — every cover as a thumbnail (newest first, printed ones
+  greyed out), hand-pick covers onto a sheet or one-click the oldest full page:
+
+![Funkuino Studio — card printing](docs/screenshots/karten.png)
+
+- **Embedded Claude agent** (optional, [Claude Agent
+  SDK](https://docs.anthropic.com/en/api/agent-sdk/overview)): paste a URL into
+  the library tab and an agent session handles the intake — probe, classify
+  (song/album/audiobook), download with the right flags, verify naming and
+  covers, report back — asking *you* whenever a judgment call is needed
+  (episode numbering, attribution, intro wording), via question cards in the
+  browser. Permission model: read-only tools and the project's own commands are
+  auto-allowed, risky ones always raise an approval card. Needs your own
+  [Claude Code](https://claude.com/claude-code) installation and a subscription
+  token — the Agent tab walks you through both.
+
+## The tools underneath
+
+Studio is a front end for these; each is also a command of its own, and the
+app puts them on your PATH as `funkuino <command>`.
 
 - **`funkuino sync` — rsync-style mirror to the device.** One-way mirror of a local
   `files/` folder to the ESPuino over its HTTP API. Fast recursive listing,
@@ -43,38 +74,26 @@ there is nothing to install first.
   the margins. Print, stick an RFID tag on each card's back, laminate, cut. A
   print manifest makes a bare `funkuino cards` mean "everything new since last
   time", with stackable `--undo`.
-- **Funkuino Studio** — the app's window (and `funkuino studio` in a browser).
-  One dashboard for the whole workflow
-  (see below), including a visual card picker: every cover as a thumbnail
-  (newest first, printed ones greyed out), hand-pick covers onto a sheet or
-  one-click the oldest full page.
 
-## Funkuino Studio
+## Extensions — your own commands and your own agent
 
-Studio is a dashboard covering the entire pipeline per card — Download ·
-Cover · Sync · Print · RFID — where the status boxes are also the actions:
-click a unit's sync box to upload it, select covers for printing via a floating
-print bar, assign RFID cards straight from the library view.
+Some sources need handling the shipped `download` does not have, and everyone's
+library has conventions of its own. Both are extendable without touching this
+repository, because both live in *your* library folder:
 
-- **Live RFID assignment:** Studio keeps a passive websocket to the device and
-  hears every card placement. Put an unknown card on the box, click the row it
-  should belong to — assigned (with sensible play-mode defaults per content
-  type).
-- **Integrated card printing** with the same manifest and `--undo` semantics as
-  the command line:
-
-![Funkuino Studio — card printing](docs/screenshots/karten.png)
-
-- **Embedded Claude agent** (optional, [Claude Agent
-  SDK](https://docs.anthropic.com/en/api/agent-sdk/overview)): paste a URL into
-  the library tab and an agent session handles the intake — probe, classify
-  (song/album/audiobook), download with the right flags, verify naming and
-  covers, report back — asking *you* whenever a judgment call is needed
-  (episode numbering, attribution, intro wording), via question cards in the
-  browser. Permission model: read-only tools and the project's own commands are
-  auto-allowed, risky ones always raise an approval card. Needs your own
-  [Claude Code](https://claude.com/claude-code) installation and a subscription
-  token — the Agent tab walks you through both.
+- **`extensions/<name>.py` becomes `funkuino <name>`.** A script dropped there
+  is run with the project's own modules importable, so it can reuse the
+  download pipeline, the naming rules and the device client. The one that grew
+  this mechanism reconstructs complete audiobook series from a YouTube Music
+  "Topic" channel, where the shipped downloader only sees a jumble of chapter
+  tracks. An optional `<name>.permissions.json` (`{"allow": [...], "ask": [...]}`)
+  declares how the embedded agent may call it — an extension that declares
+  nothing simply needs your approval every time.
+- **`CLAUDE.md` in your library folder teaches the agent your conventions.**
+  It is loaded into every agent session on top of the project's own
+  instructions: how you want a particular series named, that a certain source
+  needs cookies, which play mode a kind of content should get. This is how the
+  intake flow learns your habits instead of you repeating them per download.
 
 ## Install
 
