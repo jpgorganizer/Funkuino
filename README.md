@@ -8,8 +8,12 @@ The [ESPuino](https://forum.espuino.de) is a wonderful DIY, RFID-controlled
 audio player for children: put a card on the box, the story plays. What it
 doesn't come with is comfortable tooling for the grown-up side of the workflow —
 getting audio onto the device, keeping a library organised, and producing the
-physical cards. Funkuino is that missing half: a set of small, sharp
-command-line tools plus one local web app that ties them together.
+physical cards. Funkuino is that missing half: a Mac app you can double-click,
+and the same tools as small, sharp command-line programs underneath.
+
+**[Download Funkuino for macOS](../../releases/latest)** — a signed, notarised
+app for Apple Silicon (macOS 14+). It brings its own Python and ffmpeg, so
+there is nothing to install first.
 
 ![Funkuino Studio — library view](docs/screenshots/bibliothek.png)
 
@@ -17,7 +21,7 @@ command-line tools plus one local web app that ties them together.
 
 ## Features
 
-- **`./sync` — rsync-style mirror to the device.** One-way mirror of a local
+- **`funkuino sync` — rsync-style mirror to the device.** One-way mirror of a local
   `files/` folder to the ESPuino over its HTTP API. Fast recursive listing,
   change detection via a local manifest (the device can't report file sizes
   cheaply), crash-safe incremental state (an interrupted upload is never
@@ -25,28 +29,29 @@ command-line tools plus one local web app that ties them together.
   guard rails, automatic NFC/NFD Unicode normalisation (macOS vs. device), and
   per-device manifests keyed by MAC address — mirror the same library to two
   ESPuinos without confusion.
-- **`./download` — audio intake in the library's conventions.** A yt-dlp
+- **`funkuino download` — audio intake in the library's conventions.** A yt-dlp
   wrapper that lands audio as your library expects it: songs, albums with
   ordered track numbers, or audiobooks (Hörspiele) — multi-part episodes merged
   into a single MP3 with a spoken title intro (macOS `say`), correct tags, and
   the full-resolution title image saved separately for card printing (covers
   are deliberately *not* embedded in the audio: the device has no display and a
   large leading ID3 tag makes playback start-stutter).
-- **`./prepare` / `./covers`** — the audiobook merge as a standalone tool, and
+- **`funkuino prepare` / `funkuino covers`** — the audiobook merge as a standalone tool, and
   batch extraction of embedded cover art from an existing library.
-- **`./cards` — printable RFID card sheets.** Lays title images out as
+- **`funkuino cards` — printable RFID card sheets.** Lays title images out as
   edge-to-edge 6×6 cm squares on A4 PDFs (12 per page) with cut tick marks in
   the margins. Print, stick an RFID tag on each card's back, laminate, cut. A
-  print manifest makes a bare `./cards` mean "everything new since last time",
-  with stackable `--undo`.
-- **`./studio` — Funkuino Studio.** One local web app for the whole workflow
+  print manifest makes a bare `funkuino cards` mean "everything new since last
+  time", with stackable `--undo`.
+- **Funkuino Studio** — the app's window (and `funkuino studio` in a browser).
+  One dashboard for the whole workflow
   (see below), including a visual card picker: every cover as a thumbnail
   (newest first, printed ones greyed out), hand-pick covers onto a sheet or
   one-click the oldest full page.
 
 ## Funkuino Studio
 
-`./studio` opens a dashboard covering the entire pipeline per card — Download ·
+Studio is a dashboard covering the entire pipeline per card — Download ·
 Cover · Sync · Print · RFID — where the status boxes are also the actions:
 click a unit's sync box to upload it, select covers for printing via a floating
 print bar, assign RFID cards straight from the library view.
@@ -56,7 +61,7 @@ print bar, assign RFID cards straight from the library view.
   should belong to — assigned (with sensible play-mode defaults per content
   type).
 - **Integrated card printing** with the same manifest and `--undo` semantics as
-  `./cards`:
+  the command line:
 
 ![Funkuino Studio — card printing](docs/screenshots/karten.png)
 
@@ -66,11 +71,33 @@ print bar, assign RFID cards straight from the library view.
   (song/album/audiobook), download with the right flags, verify naming and
   covers, report back — asking *you* whenever a judgment call is needed
   (episode numbering, attribution, intro wording), via question cards in the
-  browser. Permission model: read-only tools and the repo's wrappers are
-  auto-allowed, risky commands always raise an approval card. Requires a
-  subscription token in `.env` (`SDK_TOKEN=…` from `claude setup-token`).
+  browser. Permission model: read-only tools and the project's own commands are
+  auto-allowed, risky ones always raise an approval card. Needs your own
+  [Claude Code](https://claude.com/claude-code) installation and a subscription
+  token — the Agent tab walks you through both.
 
-## Quickstart
+## Install
+
+Download the DMG from [Releases](../../releases/latest), drag the app to
+Applications, start it. On first launch it asks for two things: where your
+library should live (a normal folder — put it on an external disk if you like)
+and your ESPuino's name or IP. Nothing else to install: the app carries its own
+Python runtime and a purpose-built ffmpeg.
+
+![First launch](docs/screenshots/einrichtung.png)
+
+**Two limitations to know before you download:**
+
+- **The interface is German only.** The tools, the code and this documentation
+  are English, but every label and message a user sees is German. Translations
+  would be welcome.
+- **Apple Silicon only** (macOS 14+). The bundled Python is
+  single-architecture, so an Intel build has to be built on an Intel Mac —
+  possible (`make release` in `mac/`), just not something I can produce here.
+
+### From source
+
+The same tools work without the app, and that is how they are developed:
 
 ```bash
 git clone https://github.com/sadilek/Funkuino.git
@@ -78,18 +105,21 @@ cd Funkuino
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ./sync --dry-run        # see what would be uploaded (files/ -> device)
-./sync                  # mirror files/ to espuino.local
 ./cards                 # lay out new cover images as a printable PDF
 ./studio                # open the dashboard at http://127.0.0.1:8800
 ```
 
-Requirements: Python ≥ 3.11, **ffmpeg** on PATH, macOS for the spoken
-audiobook intros (`say`) — everything else works cross-platform in principle
-but is developed and tested on macOS. Python dependencies (yt-dlp, Pillow,
-aiohttp, …) come from `requirements.txt`.
+`bin/funkuino <command>` is the same entry point the app uses; the `./sync`,
+`./download`, … wrappers in the root are one-liners onto it.
+
+Requirements for the source route: Python ≥ 3.11, **ffmpeg** on PATH, and macOS
+for the spoken audiobook intros (`say`). Everything else is cross-platform in
+principle but developed and tested on macOS.
 
 Configuration: CLI flags > `ESPUINO_*` env vars > defaults (`ESPUINO_HOST`,
 `ESPUINO_LOCAL_DIR`, `ESPUINO_REMOTE_ROOT`, `ESPUINO_HTTP_USER`/`_PASSWORD`).
+`FUNKUINO_DATA_DIR` (or `funkuino --data-dir`) points the whole installation at
+a different library folder — that is what the app configures for you.
 
 ## Library conventions
 
@@ -104,6 +134,12 @@ database:
 | Multi-story episode | `files/<Series>/Folge <N>/<NN> <Story>.mp3` (folder = card, stories navigable with prev/next) |
 
 Cover images mirror the same paths under `card-covers/` (one image per card).
+
+A library folder holds `files/`, `card-covers/`, `print-sheets/` and a visible
+`status/` with the sync and print manifests — nothing hidden, so moving the
+library by hand cannot silently leave its state behind. Your Claude token is
+deliberately *not* in there: it lives with the installation, in
+`~/Library/Application Support/Funkuino/`.
 
 ## Hard-won device knowledge
 

@@ -29,7 +29,9 @@ APP         := $(BUILD)/$(APP_NAME).app
 # unnoticed. Depend on a stamp file instead.
 STAMP       := $(BUILD)/.app.stamp
 CONTENTS    := $(APP)/Contents
-DMG         := $(BUILD)/$(APP_NAME)-$(VERSION).dmg
+# The architecture is in the name: the bundle carries a single-arch Python, so
+# an Intel build is a separate file rather than a replacement.
+DMG         := $(BUILD)/$(APP_NAME)-$(VERSION)-$(ARCH).dmg
 
 SOURCES     := $(wildcard $(HERE)$(APP_NAME)/*.swift)
 RUNTIME     := $(BUILD)/runtime
