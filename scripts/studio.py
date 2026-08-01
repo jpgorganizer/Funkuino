@@ -53,7 +53,9 @@ import sync
 from print_state import PrintState, _key
 from sync_state import SyncState
 
-WEB_DIR = espuino.REPO_ROOT / "scripts" / "studio_web"
+# Relative to this module, not to the code root: installed as a wheel there is
+# no "scripts" directory below the root — the package *is* it.
+WEB_DIR = Path(__file__).resolve().parent / "studio_web"
 DEFAULT_PORT = 8800
 PING_TIMEOUT = 4.0  # seconds; keep the dashboard responsive when the device is off
 THUMB_CACHE_MAX = 200   # LRU cap on rendered thumbnails
@@ -745,7 +747,7 @@ class Studio:
     async def _run_cards(self, argv: list[str]) -> None:
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(espuino.REPO_ROOT / "bin" / "funkuino"), *argv,
+                *espuino.dispatcher_argv(), *argv,
                 cwd=str(espuino.DATA_ROOT),
                 # Resolved once here so the child does not re-read the config.
                 env={**os.environ, "FUNKUINO_DATA_DIR": str(espuino.DATA_ROOT)},

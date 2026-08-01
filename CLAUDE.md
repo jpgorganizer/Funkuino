@@ -39,7 +39,10 @@ Funkuino/
   covers                # wrapper: extract title images into card-covers/
   cards                 # wrapper: lay out card-covers/ into printable PDFs
   studio                # wrapper: Funkuino Studio web app (dashboard + agent)
+  pyproject.toml        # the wheel: pipx-installable (see Python package)
+  hatch_build.py        # build hook: dependencies come from requirements.txt
   scripts/
+    cli.py              # the command dispatcher (bin/funkuino and the console script)
     espuino.py          # HTTP API client + device quirks (the knowledge lives here)
     sync_state.py       # per-device upload manifest
     sync.py             # the rsync-style mirror CLI
@@ -79,12 +82,22 @@ purpose: missing it only drops the spoken intro, so the merge continues.
 
 ### Commands: one dispatcher, two spellings
 
-`bin/funkuino <command> [args…]` is the single entry point; a command is simply
+`funkuino <command> [args…]` is the single entry point; a command is simply
 `scripts/<command>.py`, or `<data folder>/extensions/<command>.py` for anything
 not shipped with the app (see *Extensions*). Plus one special command,
-`funkuino python`, which is the venv interpreter with `scripts/` importable. The
-`./sync`, `./download`, … wrappers in the root are one-liners onto it and stay
-the convenient form **for humans**.
+`funkuino python`, which is this installation's interpreter with the modules
+importable. The `./sync`, `./download`, … wrappers in the root are one-liners
+onto it and stay the convenient form **for humans**.
+
+The dispatcher itself is `scripts/cli.py`. `bin/funkuino` only picks the
+interpreter (bundle `runtime/` or `.venv/`) and calls into it; the installed
+console script *is* `funkuino.cli:main`. Two copies of the command routing, one
+in bash and one in Python, would drift apart. Commands run in-process via
+`runpy`, so Ctrl+C lands on the command (sync's manifest handling depends on
+that) instead of on a wrapper. Two things the bash version got for free and the
+Python one has to do by hand: printing the message of a string-valued
+`SystemExit` (`require_ffmpeg`, argparse) rather than swallowing it, and exiting
+quietly on `BrokenPipeError` (`funkuino … | head`).
 
 **The Studio agent must use the `funkuino <command>` form** (its sessions get
 `bin/` on `PATH`). The reason is the permission layer: `ALLOWED_TOOLS` and
@@ -102,6 +115,11 @@ cannot generalise to `funkuino sync`.
 
 `espuino.REPO_ROOT` is where the **code** lives (wrappers, scripts, Studio web
 assets) — read-only in a packaged app, so nothing may be written below it.
+`espuino.BUNDLED_LAYOUT` says whether that root is one of *ours* (a checkout or
+the bundle, both of which have `bin/funkuino` next to `scripts/`) or
+site-packages from a pip install; it decides the data-root default and how our
+own code spells a `funkuino <command>` invocation
+(`dispatcher_argv()` / `dispatcher_bin_dir()`).
 `espuino.DATA_ROOT` is where the **user's stuff** lives and is what everything
 else derives from: `files/`, `card-covers/`, `print-sheets/`, `status/`,
 `extensions/`, `CLAUDE.local.md`, and the agent session's cwd. **Nothing in it
@@ -138,12 +156,16 @@ else `$XDG_CONFIG_HOME/funkuino` — and asks `sys.platform`, never `os.uname()`
 which does not exist on Windows and would fail at *import* time.
 
 Both roots are also dispatcher options — `funkuino --config-dir DIR --data-dir
-DIR <command>` — which export the variables before Python starts, since
-espuino.py resolves them at *import* time (a flag parsed inside a script would
-be too late). `--config-dir` is how the app's first-run flow is tested
-repeatedly without disturbing the real installation. Default = the checkout, so a plain `git clone` behaves exactly
-as before; the config file is how a packaged app tells the CLI which folder it
-was pointed at, so both operate on one library instead of diverging. Use
+DIR <command>` — which are applied to the environment before espuino.py is
+imported, since it resolves them at *import* time (a flag parsed inside a script
+would be too late). `--config-dir` is how the app's first-run flow is tested
+repeatedly without disturbing the real installation. Default = the checkout, so
+a plain `git clone` behaves exactly as before; the config file is how a packaged
+app tells the CLI which folder it was pointed at, so both operate on one library
+instead of diverging. **A pip install has no checkout to default to** — its
+REPO_ROOT is site-packages, which is no place for a media library — so it falls
+back to `~/Funkuino` (`_default_data_dir()`), visible in the home directory for
+the same reason nothing inside the data folder is hidden. Use
 `espuino.data_or_repo(name)` for the per-installation side files — they belong
 to the data folder but may still sit in the checkout (the private overlay
 symlinks them there).
@@ -151,6 +173,10 @@ symlinks them there).
 Consequence for the agent: with a separate data folder its cwd holds no
 CLAUDE.md, so `_system_append()` appends the code root's CLAUDE.md explicitly
 (`setting_sources=["project"]` still picks up a data-folder CLAUDE.md on top).
+Where that file *is* differs per installation, hence `espuino.knowledge_file()`:
+above the code in a checkout and in the bundle, inside the package in a wheel
+(there is no "above" in site-packages), which is why pyproject force-includes
+it.
 
 ### Extensions
 
@@ -179,7 +205,7 @@ checkout — `.agent-allow.json` is still read — but have no place in an app).
 ## Quickstart
 
 ```bash
-# one-time setup
+# one-time setup (development; an end user on Linux installs the wheel with pipx)
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ./sync                 # upload new/changed files from files/ to the device
@@ -539,6 +565,40 @@ here have **no** `/SD-Card` prefix (that prefix only exists over FTP).
   macOS junk (`._*`, `.DS_Store`) on the device *is* removed by `--delete`.
 - The web UI's file tree caches; after cleaning up on the device, reload it or it
   shows stale duplicates.
+
+## Python package (the wheel)
+
+The distribution for Linux (and, without the shell wrappers, Windows). Built
+with hatchling; `python -m build --wheel` produces it.
+
+**Not on PyPI yet** — the README therefore documents
+`pipx install git+https://github.com/sadilek/Funkuino.git`, which installs the
+same wheel from source. Uploading it (`twine upload dist/*`) would make
+`pipx install funkuino` work and is the only step left; the name is unclaimed
+as of this writing.
+
+- **`scripts/` installs as the package `funkuino`** (`sources = {"scripts" =
+  "funkuino"}`), but **nothing imports it as a package**. The console script is
+  `funkuino.cli:main`, and `cli.main` puts its own directory on `sys.path` so
+  the flat `import espuino` style keeps working everywhere. That is deliberate,
+  not laziness: `espuino` loaded both flat *and* as `funkuino.espuino` would be
+  two module objects with two DATA_ROOTs and two sets of manifest state — and
+  the sync manifest is precisely the thing that must not exist twice. It also
+  means extensions (which `import espuino`) work unchanged in an install.
+- **One dependency list.** `hatch_build.py` is an in-tree metadata hook that
+  reads `requirements.txt`, so the wheel and the documented venv flow (and
+  `mac/runtime.py`, which pours the same file into the embedded interpreter)
+  cannot drift apart. An in-tree hook keeps hatchling the only build
+  requirement.
+- **One version**: `pyproject.toml` owns it and `mac/Makefile` derives `VERSION`
+  from it, so a release cannot ship a DMG and a wheel that disagree.
+- **Assets are found relative to the module**, not to the code root
+  (`studio.WEB_DIR`): installed, there is no `scripts/` below the root.
+- **Floor is Python 3.10** (verified by installing and running the wheel on
+  3.10) — that covers Ubuntu 22.04; the macOS bundle ships 3.13.
+- Not covered by the wheel: the `./sync`-style wrappers (shell scripts, checkout
+  convenience) and ffmpeg, which the user installs — see the ffmpeg note under
+  *Layout*.
 
 ## macOS app (`mac/`)
 

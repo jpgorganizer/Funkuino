@@ -16,12 +16,14 @@
 
 APP_NAME    := Funkuino
 BUNDLE_ID   := de.sadilek.funkuino
-VERSION     := 0.1.0
 MIN_MACOS   := 14.0
 ARCH        := $(shell uname -m)
 
 HERE        := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CODE_ROOT   := $(patsubst %/,%,$(dir $(patsubst %/,%,$(HERE))))
+# One version for the app and the Python package — pyproject.toml owns it, so a
+# release cannot ship a DMG and a wheel that disagree about what they are.
+VERSION     := $(shell sed -n 's/^version = "\(.*\)"/\1/p' $(CODE_ROOT)/pyproject.toml | head -1)
 BUILD       := $(HERE)build
 APP         := $(BUILD)/$(APP_NAME).app
 # The bundle is a directory, and a directory's mtime does not move when files

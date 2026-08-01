@@ -38,7 +38,10 @@ from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 # permission patterns below can match regardless of cwd, which the ./ wrappers
 # cannot once code and data live in different places (packaged app).
 DISPATCHER = "funkuino"
-BIN_DIR = espuino.REPO_ROOT / "bin"
+# A checkout and the bundle have bin/; a pip install has the console script next
+# to the interpreter. Either way the agent needs the bare *name* on PATH,
+# because the permission patterns match the literal command line.
+BIN_DIR = espuino.dispatcher_bin_dir()
 
 # Bare allowlist: these are auto-approved deterministically (no classifier
 # round-trip, no card). The risky set lives in ASK_RULES instead.
@@ -150,8 +153,10 @@ def _system_append() -> str:
     """
     parts = [SYSTEM_APPEND]
     if espuino.DATA_ROOT != espuino.REPO_ROOT:
-        with contextlib.suppress(OSError):
-            parts.append((espuino.REPO_ROOT / "CLAUDE.md").read_text())
+        knowledge = espuino.knowledge_file()
+        if knowledge:
+            with contextlib.suppress(OSError):
+                parts.append(knowledge.read_text())
     with contextlib.suppress(OSError):
         parts.append(espuino.data_or_repo("CLAUDE.local.md").read_text())
     return "\n\n".join(parts)
@@ -429,7 +434,9 @@ class SessionManager:
             # so a shell profile that appends its own entries cannot shadow it;
             # if a profile overwrites PATH wholesale the agent fails loudly with
             # "command not found" rather than quietly finding something else.
-            "PATH": f"{BIN_DIR}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}",
+            "PATH": os.pathsep.join(
+                [*([str(BIN_DIR)] if BIN_DIR else []),
+                 os.environ.get("PATH", "/usr/bin:/bin")]),
             # Resolve the data folder once here instead of letting every child
             # process re-read the config file.
             "FUNKUINO_DATA_DIR": str(espuino.DATA_ROOT),

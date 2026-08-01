@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "funkuino"
+version = "0.1.0"
+description = "Manage an ESPuino kids' audio player: library mirroring, printable RFID cards, and a local web dashboard"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Daniel Sadilek" }]
+requires-python = ">=3.10"
+keywords = ["espuino", "esp32", "rfid", "audiobook", "audio", "children"]
+classifiers = [
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+# Read from requirements.txt by hatch_build.py — see there for why the list has
+# to live in exactly one file.
+dynamic = ["dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/sadilek/Funkuino"
+Source = "https://github.com/sadilek/Funkuino"
+
+# One console script, not one per command: `funkuino <command>` is the spelling
+# the Studio agent's permission patterns match (scripts/cli.py explains why).
+[project.scripts]
+funkuino = "funkuino.cli:main"
+
+[tool.hatch.metadata.hooks.custom]
+path = "hatch_build.py"
+
+# The modules live in scripts/ and import each other flatly; the wheel installs
+# that directory as the package `funkuino`. See scripts/__init__.py for why the
+# flat import style survives the rename.
+[tool.hatch.build.targets.wheel]
+only-include = ["scripts"]
+sources = { "scripts" = "funkuino" }
+
+# The agent is handed the project's CLAUDE.md as knowledge. A checkout and the
+# macOS bundle have it above the code; in site-packages there is no "above", so
+# the wheel carries a copy inside the package (espuino.knowledge_file()).
+[tool.hatch.build.targets.wheel.force-include]
+"CLAUDE.md" = "funkuino/CLAUDE.md"
+
+[tool.hatch.build.targets.sdist]
+include = ["scripts", "bin", "sync", "download", "prepare", "covers", "cards",
+           "studio", "requirements.txt", "hatch_build.py", "CLAUDE.md",
+           "README.md", "LICENSE"]

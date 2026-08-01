@@ -110,13 +110,42 @@ Python runtime and a purpose-built ffmpeg.
 - **The interface is German only.** The tools, the code and this documentation
   are English, but every label and message a user sees is German. Translations
   would be welcome.
-- **Apple Silicon only** (macOS 14+). The bundled Python is
+- **The app is Apple Silicon only** (macOS 14+). The bundled Python is
   single-architecture, so an Intel build has to be built on an Intel Mac —
   possible (`make release` in `mac/`), just not something I can produce here.
+  On Linux, install it with pipx instead (below); there the same Studio runs in
+  your browser.
+
+### Linux (and Windows via WSL)
+
+There is no app bundle outside macOS, but Studio and every command are plain
+Python and run anywhere:
+
+```bash
+pipx install git+https://github.com/sadilek/Funkuino.git
+sudo apt install ffmpeg        # or dnf/pacman/zypper — funkuino tells you which
+
+funkuino studio                # dashboard at http://127.0.0.1:8800
+funkuino sync --dry-run        # see what would be uploaded
+funkuino cards                 # printable PDF of the new covers
+```
+
+The library then defaults to `~/Funkuino/` (change it with `funkuino --data-dir`
+or a `data_dir` entry in `~/.config/funkuino/config.json`), and configuration
+follows the platform: `$XDG_CONFIG_HOME/funkuino` on Linux,
+`%APPDATA%\Funkuino` on Windows.
+
+Two things differ from macOS: the spoken intro in front of merged audiobooks
+uses macOS' `say` and is skipped elsewhere (the merge itself runs normally), and
+a finished print sheet is not opened for you — it is written to
+`print-sheets/`. Windows currently needs WSL, since the `./sync`-style wrappers
+are shell scripts; the `funkuino …` commands themselves do not depend on a
+shell.
 
 ### From source
 
-The same tools work without the app, and that is how they are developed:
+The same tools work without any installation, and that is how they are
+developed:
 
 ```bash
 git clone https://github.com/sadilek/Funkuino.git
@@ -129,11 +158,10 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
 `bin/funkuino <command>` is the same entry point the app uses; the `./sync`,
-`./download`, … wrappers in the root are one-liners onto it.
+`./download`, … wrappers in the root are one-liners onto it. A checkout keeps
+its library in the checkout, so cloning and running changes nothing outside it.
 
-Requirements for the source route: Python ≥ 3.11, **ffmpeg** on PATH, and macOS
-for the spoken audiobook intros (`say`). Everything else is cross-platform in
-principle but developed and tested on macOS.
+Requirements for the source route: Python ≥ 3.10 and **ffmpeg** on PATH.
 
 Configuration: CLI flags > `ESPUINO_*` env vars > defaults (`ESPUINO_HOST`,
 `ESPUINO_LOCAL_DIR`, `ESPUINO_REMOTE_ROOT`, `ESPUINO_HTTP_USER`/`_PASSWORD`).
@@ -158,7 +186,7 @@ A library folder holds `files/`, `card-covers/`, `print-sheets/` and a visible
 `status/` with the sync and print manifests — nothing hidden, so moving the
 library by hand cannot silently leave its state behind. Your Claude token is
 deliberately *not* in there: it lives with the installation, in
-`~/Library/Application Support/Funkuino/`.
+`~/Library/Application Support/Funkuino/` (or `~/.config/funkuino/` on Linux).
 
 ## Hard-won device knowledge
 

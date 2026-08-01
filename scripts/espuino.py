@@ -57,6 +57,15 @@ import requests
 # below it — user data goes to DATA_ROOT instead.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Is the code root a place with the project's own layout around it? A git
+# checkout and the macOS bundle both ship bin/funkuino next to scripts/; a
+# pip/pipx installation has neither, because the modules then sit in
+# site-packages. The distinction decides two things that must not guess wrong:
+# where the library defaults to (site-packages is emphatically not it) and how
+# our own code spells a `funkuino <command>` invocation.
+BUNDLED_LAYOUT = (REPO_ROOT / "bin" / "funkuino").is_file()
+
+
 def _default_config_dir() -> Path:
     """The platform's own place for application configuration.
 
@@ -80,15 +89,29 @@ APP_CONFIG_DIR = Path(
 APP_CONFIG_FILE = APP_CONFIG_DIR / "config.json"
 
 
+def _default_data_dir() -> Path:
+    """Where a pip/pipx installation puts the library when nothing says otherwise.
+
+    Visible in the home directory on purpose, not tucked into ~/.local/share:
+    the data folder is the user's music, covers and print sheets, and it is
+    meant to be found, copied and backed up by hand — the same reasoning that
+    keeps everything inside it unhidden (see the folder's own README.txt).
+    """
+    return Path.home() / "Funkuino"
+
+
 def _resolve_data_root() -> Path:
     """Where the *data* lives: library, covers, print sheets, status.
 
-    FUNKUINO_DATA_DIR > app config file > the checkout.
+    FUNKUINO_DATA_DIR > app config file > the code root, or ~/Funkuino when the
+    code root is not one of ours.
 
     The config file is the app's channel: it is written by the GUI's settings
     pane and read here, so `./sync` from a terminal and the app operate on the
     same library instead of silently diverging. It is absent in a plain
-    checkout, which is why the default stays REPO_ROOT.
+    checkout, which is why the default stays REPO_ROOT *there* — but a pip
+    install's REPO_ROOT is site-packages, where a media library has no business
+    being, so that case falls back to the home directory instead.
     """
     if env := os.environ.get("FUNKUINO_DATA_DIR"):
         return Path(env).expanduser().resolve()
@@ -96,7 +119,9 @@ def _resolve_data_root() -> Path:
         configured = json.loads(APP_CONFIG_FILE.read_text()).get("data_dir")
     except (OSError, ValueError):
         configured = None
-    return Path(configured).expanduser().resolve() if configured else REPO_ROOT
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return REPO_ROOT if BUNDLED_LAYOUT else _default_data_dir()
 
 
 DATA_ROOT = _resolve_data_root()
@@ -128,6 +153,49 @@ def data_or_repo(name: str) -> Path:
     """
     candidate = DATA_ROOT / name
     return candidate if candidate.exists() else REPO_ROOT / name
+
+
+def knowledge_file() -> Path | None:
+    """The project CLAUDE.md the agent is given, wherever this install keeps it.
+
+    A checkout and the macOS bundle have it above the code; a wheel ships it
+    *inside* the package, because there is no "above" in site-packages.
+    """
+    for candidate in (REPO_ROOT / "CLAUDE.md", Path(__file__).resolve().parent / "CLAUDE.md"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+# --- Invoking ourselves -----------------------------------------------------
+# Studio shells out to `funkuino <command>` for the jobs it runs, and hands the
+# agent a PATH on which that name resolves. Both spellings have to survive the
+# installation layout, so the knowledge of how lives here rather than in each
+# caller.
+
+def dispatcher_argv() -> list[str]:
+    """Command prefix for running a subcommand as a child process."""
+    if BUNDLED_LAYOUT:
+        return [str(REPO_ROOT / "bin" / "funkuino")]
+    # Not `shutil.which("funkuino")`: PATH may hold a *different* installation,
+    # and the child must be the one whose modules we are currently running.
+    return [sys.executable, "-m", "funkuino.cli"]
+
+
+def dispatcher_bin_dir() -> Path | None:
+    """A directory holding an executable named ``funkuino``, for a child's PATH.
+
+    The agent's permission rules match the literal string `funkuino …`, so the
+    agent needs the name on PATH — not an interpreter invocation.
+    """
+    if BUNDLED_LAYOUT:
+        return REPO_ROOT / "bin"
+    # pip and pipx put the console script next to the interpreter running us.
+    here = Path(sys.executable).parent
+    if any((here / name).exists() for name in ("funkuino", "funkuino.exe")):
+        return here
+    found = shutil.which("funkuino")
+    return Path(found).parent if found else None
 
 
 # --- ffmpeg -----------------------------------------------------------------

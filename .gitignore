@@ -34,3 +34,8 @@ print-sheets/
 # macOS app build output and the generated icon (mac/icon.py rebuilds it)
 mac/build/
 mac/Funkuino.icns
+
+# Python package build output (python -m build)
+dist/
+build/
+*.egg-info/

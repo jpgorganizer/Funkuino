@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Funkuino command dispatcher: `funkuino <command> [args…]`.
+# Funkuino command dispatcher — the shell half.
 #
-# Why this exists rather than the plain ./sync, ./download … wrappers: the
-# Studio agent's permission rules are TEXT patterns matched against the Bash
+# All it does is pick the interpreter that has our dependencies and hand over to
+# scripts/cli.py, which is the actual dispatcher (and is also what the installed
+# `funkuino` console script runs). Two copies of the command routing, one in
+# bash and one in Python, would drift; this way a checkout, the macOS bundle and
+# a pip install all execute the same code.
+#
+# Why the dispatcher exists rather than the plain ./sync, ./download … wrappers:
+# the Studio agent's permission rules are TEXT patterns matched against the Bash
 # command (studio_agent.py ALLOWED_TOOLS / ASK_RULES). Relative wrappers only
 # match while the agent's cwd is the checkout — in a packaged app the code sits
 # read-only inside the bundle and the data folder is elsewhere. Putting this
@@ -11,11 +17,6 @@
 # the agent in an environment variable would NOT work: `$FUNKUINO_HOME/sync`,
 # "${FUNKUINO_HOME}/sync" and the expanded absolute path are all different
 # strings, so an ask rule would be one spelling away from being bypassed.
-#
-# A command <name> is `scripts/<name>.py` — or, for anything not shipped with
-# the app, `<data folder>/extensions/<name>.py`. The extensions directory is the
-# supported place for private or machine-local tooling: the code root is
-# read-only in a packaged app, so nothing may be installed into scripts/ there.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,92 +28,14 @@ else
     PY="$ROOT/.venv/bin/python"
 fi
 
-# Support modules, not commands.
-INTERNAL=" espuino sync_state print_state studio_state studio_agent progress "
-
-# Resolve the data folder the same way espuino.py does — by asking it, so the
-# precedence (env > app config file > checkout) lives in exactly one place.
-# Only needed when a command is not part of the shipped set, so the common path
-# stays free of the interpreter start-up.
-data_root() {
-    if [[ -n "${FUNKUINO_DATA_DIR:-}" ]]; then
-        printf '%s' "$FUNKUINO_DATA_DIR"
-    else
-        "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import espuino
-print(espuino.DATA_ROOT)' "$ROOT/scripts" 2>/dev/null || printf '%s' "$ROOT"
-    fi
-}
-
-usage() {
-    echo "Usage: funkuino [--config-dir DIR] [--data-dir DIR] <command> [args…]" >&2
-    echo >&2
-    echo "Global options:" >&2
-    echo "  --config-dir DIR    where the installation's config.json lives" >&2
-    echo "  --data-dir DIR      the media library, covers, manifests" >&2
-    echo >&2
-    echo "Commands:" >&2
-    for script in "$ROOT"/scripts/*.py; do
-        name="$(basename "$script" .py)"
-        [[ "$INTERNAL" == *" $name "* ]] || echo "  $name" >&2
-    done
-    echo "  python              # the project venv's interpreter" >&2
-    local ext_dir; ext_dir="$(data_root)/extensions"
-    if compgen -G "$ext_dir/*.py" > /dev/null; then
-        echo >&2
-        echo "Extensions ($ext_dir):" >&2
-        for script in "$ext_dir"/*.py; do
-            echo "  $(basename "$script" .py)" >&2
-        done
-    fi
-}
-
-# Global options come before the command and are passed on as environment, not
-# as arguments: they have to take effect before Python starts, because espuino.py
-# resolves both roots at import time. This is also the lever for testing the
-# first-run flow repeatedly (`funkuino --config-dir /tmp/probe studio`).
-while [[ $# -ge 2 ]]; do
-    case "$1" in
-        --config-dir) export FUNKUINO_CONFIG_DIR="$2"; shift 2 ;;
-        --data-dir)   export FUNKUINO_DATA_DIR="$2";   shift 2 ;;
-        *) break ;;
-    esac
-done
-
-[[ $# -ge 1 ]] || { usage; exit 2; }
-
-cmd="$1"; shift
-case "$cmd" in
-    -h|--help|help) usage; exit 0 ;;
-    python)
-        # The project venv's interpreter (yt-dlp, mutagen probes, ad-hoc
-        # regroup/merge scripts). Exposed here because `.venv/bin/python` is
-        # relative to the checkout, which is not where callers necessarily are.
-        [[ -x "$PY" ]] || { echo "Project venv missing at $PY" >&2; exit 1; }
-        exec env PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" "$PY" "$@" ;;
-esac
-
-script=""
-if [[ "$INTERNAL" != *" $cmd "* && -f "$ROOT/scripts/$cmd.py" ]]; then
-    script="$ROOT/scripts/$cmd.py"
-elif [[ "$cmd" == */* || "$cmd" == .* ]]; then
-    : # never let a command name escape into a path lookup
-elif [[ -f "$(data_root)/extensions/$cmd.py" ]]; then
-    script="$(data_root)/extensions/$cmd.py"
-fi
-
-if [[ -z "$script" ]]; then
-    echo "funkuino: unknown command '$cmd'" >&2
-    usage
-    exit 2
-fi
-
 if [[ ! -x "$PY" ]]; then
     echo "Project venv missing. Create it with:" >&2
     echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    echo "(or install Funkuino with: pipx install funkuino)" >&2
     exit 1
 fi
 
-# Extension scripts are typically symlinks into a separate checkout; Python
-# resolves the real path and would look for the sibling imports (espuino,
-# download, …) next to the target. Point it at the real scripts/ directory.
-exec env PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" "$PY" "$script" "$@"
+exec "$PY" -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import cli
+sys.exit(cli.main(sys.argv[2:]))' "$ROOT/scripts" "$@"
