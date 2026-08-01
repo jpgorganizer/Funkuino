@@ -42,6 +42,7 @@ import os
 import posixpath
 import shutil
 import socket
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -56,9 +57,17 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _default_config_dir() -> Path:
-    return (Path.home() / "Library" / "Application Support" / "Funkuino"
-            if os.uname().sysname == "Darwin" else
-            Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "funkuino")
+    """The platform's own place for application configuration.
+
+    Asked via ``sys.platform``, not ``os.uname()``: the latter does not exist on
+    Windows, so importing this module raised AttributeError there before the
+    first line of any command ran.
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Funkuino"
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Funkuino"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "funkuino"
 
 
 # FUNKUINO_CONFIG_DIR points the whole installation at a different config

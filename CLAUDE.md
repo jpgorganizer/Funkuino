@@ -120,8 +120,11 @@ copied, shared and backed up and a token should not ride along. `.env` in the
 data folder or the checkout is still read if present, for older setups.
 Transient per-session progress files live there too, not in the user's music
 folder. It resolves as **`FUNKUINO_DATA_DIR` > app config file
-(`config.json`, `{"data_dir": …}`, in `FUNKUINO_CONFIG_DIR` or
-`~/Library/Application Support/Funkuino`) > the checkout**.
+(`config.json`, `{"data_dir": …}`, in `FUNKUINO_CONFIG_DIR` or the platform's
+config directory) > the checkout**. `_default_config_dir()` picks that per
+platform — `~/Library/Application Support/Funkuino`, `%APPDATA%\Funkuino`,
+else `$XDG_CONFIG_HOME/funkuino` — and asks `sys.platform`, never `os.uname()`,
+which does not exist on Windows and would fail at *import* time.
 
 Both roots are also dispatcher options — `funkuino --config-dir DIR --data-dir
 DIR <command>` — which export the variables before Python starts, since
