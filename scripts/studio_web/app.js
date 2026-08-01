@@ -30,8 +30,10 @@
  * @typedef {{ sync?: boolean, cards?: boolean, unitSync?: string[] }} Jobs
  * @typedef {{ available?: boolean, reason?: string, sessions?: SessionInfo[] }} AgentState
  * @typedef {{ playing?: boolean, unitId?: string|null, name?: string|null, pausePlay?: boolean }} Player
+ * @typedef {{ path: string|null, mp3: boolean, hint: string|null }} ToolState
  * @typedef {{ units?: Unit[], syncManifest?: SyncManifest, device?: Device|null, jobs?: Jobs,
  *   agent?: AgentState, rfid?: { listening: boolean }, player?: Player|null,
+ *   tools?: { ffmpeg?: ToolState },
  *   cardsBacklog?: { newCovers?: number, perPage?: number } }} StatePayload
  * @typedef {{ phase: "probe"|"download"|"merge"|"done", item?: number, total?: number,
  *   title?: string, bytes?: number, bytesTotal?: number|null, ts?: number }} IntakeProgress
@@ -275,6 +277,7 @@ async function refreshState(refresh) {
     for (const id of [...State.unitSyncPct.keys()]) if (!State.unitSync.has(id)) State.unitSyncPct.delete(id);
     State.player = s.player || null;
     renderDeviceChip(s.device);
+    renderToolBanner(s.tools);
     renderLibrary();
     renderNowPlaying();
     renderSyncPanel(s);
@@ -680,6 +683,27 @@ function renderNowPlaying() {
     el("span", { class: "np-name", text: (p.pausePlay ? "pausiert: " : "spielt: ") + name }),
     el("button", { class: "np-stop", title: "Stopp", text: "■",
       onclick: (/** @type {any} */ e) => { e.stopPropagation(); stopPlayer(); } }));
+}
+
+/**
+ * ffmpeg is the only thing Funkuino needs but cannot bring along outside the
+ * macOS app. Every download and every merge dies without it, so the state of it
+ * is shown as a persistent bar rather than as a toast at the moment of failure.
+ * The install command is a <code> the user can select in one click.
+ * @param {{ffmpeg?: {path: string|null, mp3: boolean, hint: string|null}}|undefined} tools
+ */
+function renderToolBanner(tools) {
+  const bar = $("#tool-banner");
+  const ff = tools && tools.ffmpeg;
+  if (!ff || (ff.path && ff.mp3)) { bar.hidden = true; return; }
+  const what = ff.path
+    ? "ffmpeg kann keine MP3s erzeugen (libmp3lame fehlt)."
+    : "ffmpeg fehlt.";
+  bar.replaceChildren(
+    el("span", { class: "tb-what", text: what }),
+    el("span", { text: "Download und Zusammenführen funktionieren erst danach." }),
+    ...(ff.hint ? [el("code", { text: ff.hint })] : []));
+  bar.hidden = false;
 }
 
 /* =============================== 6. Sync =============================== */

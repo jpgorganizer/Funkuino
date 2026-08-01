@@ -66,6 +66,17 @@ intros) must be on PATH; `id3v2` is not required. (The packaged app brings its
 own ffmpeg — see *macOS app*.) Python deps (incl. **Pillow**
 for the card sheets) come from `requirements.txt` in the venv.
 
+**ffmpeg is checked up front, never discovered by a crash.** It is the one
+dependency we cannot supply outside the macOS bundle, and *everything* audio
+shells out to it. `espuino.require_ffmpeg(purpose)` exits with an install
+command at the top of `prepare`/`download`/`covers` main() — before a long
+download, not after; `ffmpeg_hint()` reads /etc/os-release so the Linux hint
+names the right package manager. `ffmpeg_status()` additionally probes for
+**libmp3lame** (a build without it passes "is it installed" and then fails every
+conversion) and feeds Studio's `/api/state` → `tools.ffmpeg` → a persistent
+banner, plus a stderr warning at server start. `say` is treated differently on
+purpose: missing it only drops the spoken intro, so the merge continues.
+
 ### Commands: one dispatcher, two spellings
 
 `bin/funkuino <command> [args…]` is the single entry point; a command is simply

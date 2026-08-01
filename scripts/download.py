@@ -315,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cookies", metavar="FILE", help="Use a cookies.txt file")
     parser.add_argument("--sync", action="store_true", help="Run ./sync afterwards")
     args = parser.parse_args(argv)
+    # Checked before the first network call: yt-dlp needs ffmpeg to turn what it
+    # fetches into tagged MP3, so without it a long download ends in nothing.
+    espuino.require_ffmpeg("convert downloaded audio to MP3")
 
     cfg = espuino.Config.from_env()
     lib = Path(cfg.local_dir)

@@ -688,6 +688,26 @@ body.scrolled .picker-bar { box-shadow: 0 7px 8px -7px oklch(0.3 0.02 66 / .35);
 .rfid-banner .rb-icon { font-size: 16px; }
 .rfid-banner .rb-text { font-size: 14px; }
 
+/* ---------- Missing-tool banner (ffmpeg) ----------
+   Not dismissible on purpose: it states a condition, not an event. Every
+   download and every merge fails while it is up, so it stays until the tool is
+   actually there — the next state poll makes it disappear by itself. */
+
+.tool-banner {
+  flex: none; z-index: 29;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 10px 24px; border-bottom: 1px solid var(--line);
+  background: color-mix(in oklch, var(--warn) 16%, var(--surface));
+  font-size: 14px;
+}
+.tool-banner .tb-what { font-weight: 600; }
+.tool-banner code {
+  font-family: var(--font-mono); font-size: 13px;
+  padding: 2px 7px; border-radius: 6px;
+  background: color-mix(in oklch, var(--ink) 8%, transparent);
+  user-select: all;   /* one click selects the whole command to copy */
+}
+
 /* ---------- Floating print bar (Bibliothek Druck picker) ---------- */
 
 .print-bar {

@@ -42,6 +42,7 @@ import os
 import posixpath
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import unicodedata
@@ -127,6 +128,76 @@ def data_or_repo(name: str) -> Path:
     """
     candidate = DATA_ROOT / name
     return candidate if candidate.exists() else REPO_ROOT / name
+
+
+# --- ffmpeg -----------------------------------------------------------------
+# Everything that touches audio shells out to ffmpeg: the Hörspiel merge, the
+# spoken intro, cover extraction, and yt-dlp's post-processing. It is the one
+# dependency we cannot install for the user (the macOS app carries its own
+# build), so a missing one must fail with an instruction rather than with
+# "FileNotFoundError: 'ffmpeg'" from somewhere deep in a pipeline.
+
+def _linux_install_hint() -> str:
+    """Guess the package manager from /etc/os-release so the hint is copyable."""
+    ids = ""
+    try:
+        for line in Path("/etc/os-release").read_text().splitlines():
+            if line.startswith(("ID=", "ID_LIKE=")):
+                ids += " " + line.partition("=")[2].strip().strip('"')
+    except OSError:
+        pass
+    for keys, cmd in ((("debian", "ubuntu"), "sudo apt install ffmpeg"),
+                      (("fedora", "rhel", "centos"), "sudo dnf install ffmpeg"),
+                      (("arch",), "sudo pacman -S ffmpeg"),
+                      (("suse",), "sudo zypper install ffmpeg"),
+                      (("alpine",), "sudo apk add ffmpeg")):
+        if any(key in ids for key in keys):
+            return cmd
+    return "install ffmpeg with your distribution's package manager"
+
+
+def ffmpeg_hint() -> str:
+    """How to get ffmpeg on *this* platform."""
+    if sys.platform == "darwin":
+        return "brew install ffmpeg   (the Funkuino app brings its own)"
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg"
+    return _linux_install_hint()
+
+
+def find_ffmpeg() -> str | None:
+    """Path to the ffmpeg we would run, or None. The macOS bundle puts its own
+    build first on PATH, so this finds that one ahead of any Homebrew copy."""
+    return shutil.which("ffmpeg")
+
+
+def require_ffmpeg(purpose: str) -> str:
+    """Return the ffmpeg path or exit with an actionable message."""
+    found = find_ffmpeg()
+    if found:
+        return found
+    raise SystemExit(f"ERROR: ffmpeg is required to {purpose}, but it is not on PATH.\n"
+                     f"       Install it with:  {ffmpeg_hint()}")
+
+
+def ffmpeg_status() -> dict:
+    """Full picture for the Studio setup display: present, and MP3-capable?
+
+    The second question is not pedantic — a build without libmp3lame passes the
+    "is it installed" test and then fails every single conversion we do.
+    """
+    found = find_ffmpeg()
+    if not found:
+        return {"path": None, "mp3": False, "hint": ffmpeg_hint()}
+    mp3 = False
+    try:
+        out = subprocess.run([found, "-hide_banner", "-encoders"],
+                             capture_output=True, text=True, timeout=15)
+        mp3 = "libmp3lame" in out.stdout
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"path": found, "mp3": mp3, "hint": None if mp3 else ffmpeg_hint()}
+
 
 # --- Defaults ---------------------------------------------------------------
 DEFAULT_HOST = "espuino.local"

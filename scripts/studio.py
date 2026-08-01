@@ -179,6 +179,7 @@ class Studio:
 
         # Caches.
         self._state_cache: tuple[list[dict], dict | None] | None = None
+        self._ffmpeg: dict | None = None      # see _ffmpeg_state()
         self._thumbs: "OrderedDict[str, bytes]" = OrderedDict()
         self._unit_ids: set[str] = set()  # ids from the last scan (assignment mapping)
 
@@ -619,7 +620,22 @@ class Studio:
             "cardsBacklog": self._cards_backlog(units),
             "rfid": {"listening": self.rfid_listening},
             "player": self._player,
+            "tools": {"ffmpeg": self._ffmpeg_state()},
         })
+
+    def _ffmpeg_state(self) -> dict:
+        """ffmpeg is the one dependency the user has to supply themselves on
+        Linux and Windows (the macOS app carries its own), and everything audio
+        fails without it — so the UI says so up front instead of letting a
+        download die halfway.
+
+        Cached, because the probe shells out; a *missing* one is re-checked on
+        every call, which is the case where the answer can still change while
+        Studio is running (the user goes and installs it).
+        """
+        if self._ffmpeg is None or not self._ffmpeg["path"]:
+            self._ffmpeg = espuino.ffmpeg_status()
+        return self._ffmpeg
 
     async def h_device_ping(self, request: web.Request) -> web.Response:
         info = await self.ping_device()
@@ -1303,6 +1319,10 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://127.0.0.1:{args.port}/"
     print(f"Funkuino Studio at {url}"
           f"  (device: {cfg.host}, agent: {'on' if token else 'no token'})")
+    if not espuino.find_ffmpeg():
+        # Studio itself runs fine without it; downloading and merging do not.
+        print(f"WARNING: ffmpeg not found — downloads and merging will fail.\n"
+              f"         Install it with:  {espuino.ffmpeg_hint()}", file=sys.stderr)
     if not args.no_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     web.run_app(app, host="127.0.0.1", port=args.port, print=None,

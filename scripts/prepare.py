@@ -43,7 +43,13 @@ def spoken_title(title: str) -> str:
 
 
 def _run(cmd: list[str]) -> None:
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        # Reached when a caller uses these helpers as a library, past main()'s
+        # up-front check — still worth an instruction rather than a bare errno.
+        raise RuntimeError(f"{cmd[0]} is not installed. Install it with: "
+                           f"{espuino.ffmpeg_hint()}") from None
     if res.returncode != 0:
         raise RuntimeError(f"{cmd[0]} failed:\n{res.stderr.strip()[-800:]}")
 
@@ -255,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--embed-cover", action="store_true",
                         help="Also embed a small cover in the audio (off by default)")
     args = parser.parse_args(argv)
+    espuino.require_ffmpeg("merge audio tracks")
 
     folder = Path(args.folder)
     if not folder.is_dir():

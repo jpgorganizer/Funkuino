@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("path", nargs="?", help="Limit to a subpath under files/ (default: all)")
     parser.add_argument("--force", action="store_true", help="Rewrite even up-to-date covers")
     args = parser.parse_args(argv)
+    espuino.require_ffmpeg("extract cover images")
 
     cfg = espuino.Config.from_env()
     lib = Path(cfg.local_dir)
