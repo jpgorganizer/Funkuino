@@ -37,12 +37,19 @@ funkuino = "funkuino.cli:main"
 [tool.hatch.metadata.hooks.custom]
 path = "hatch_build.py"
 
+# EVERY pattern is anchored with a leading slash. Hatchling matches
+# gitignore-style, so an unanchored "scripts" or "README.md" matches at ANY
+# depth — which pulled a sibling checkout's private/scripts/ and
+# private/README.md into the sdist. A publish is irreversible, so the packaging
+# patterns say exactly which paths, from the top.
+#
 # The modules live in scripts/ and import each other flatly; the wheel installs
 # that directory as the package `funkuino`. See scripts/__init__.py for why the
 # flat import style survives the rename.
 [tool.hatch.build.targets.wheel]
-only-include = ["scripts"]
+only-include = ["/scripts"]
 sources = { "scripts" = "funkuino" }
+exclude = ["/private"]
 
 # The agent is handed the project's CLAUDE.md as knowledge. A checkout and the
 # macOS bundle have it above the code; in site-packages there is no "above", so
@@ -51,6 +58,7 @@ sources = { "scripts" = "funkuino" }
 "CLAUDE.md" = "funkuino/CLAUDE.md"
 
 [tool.hatch.build.targets.sdist]
-include = ["scripts", "bin", "sync", "download", "prepare", "covers", "cards",
-           "studio", "requirements.txt", "hatch_build.py", "CLAUDE.md",
-           "README.md", "LICENSE"]
+only-include = ["/scripts", "/bin", "/sync", "/download", "/prepare", "/covers",
+                "/cards", "/studio", "/requirements.txt", "/hatch_build.py",
+                "/CLAUDE.md", "/README.md", "/LICENSE"]
+exclude = ["/private"]

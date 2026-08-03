@@ -11,11 +11,11 @@ getting audio onto the device, keeping a library organised, and producing the
 physical cards. Funkuino is that missing half: a Mac app you can double-click,
 and the same tools as small, sharp command-line programs underneath.
 
-**[Download Funkuino for macOS](../../releases/latest)** — a signed, notarised
-app for Apple Silicon (macOS 14+). It brings its own Python and ffmpeg, so
-there is nothing to install first.
+**[Download Funkuino for macOS](https://github.com/sadilek/Funkuino/releases/latest)**
+— a signed, notarised app for Apple Silicon (macOS 14+). It brings its own
+Python and ffmpeg, so there is nothing to install first.
 
-![Funkuino Studio — library view](docs/screenshots/bibliothek.png)
+![Funkuino Studio — library view](https://raw.githubusercontent.com/sadilek/Funkuino/main/docs/screenshots/bibliothek.png)
 
 *Screenshots show a fictional demo library.*
 
@@ -34,7 +34,7 @@ print bar, assign RFID cards straight from the library view.
   the command line — every cover as a thumbnail (newest first, printed ones
   greyed out), hand-pick covers onto a sheet or one-click the oldest full page:
 
-![Funkuino Studio — card printing](docs/screenshots/karten.png)
+![Funkuino Studio — card printing](https://raw.githubusercontent.com/sadilek/Funkuino/main/docs/screenshots/karten.png)
 
 - **Embedded Claude agent** (optional, [Claude Agent
   SDK](https://docs.anthropic.com/en/api/agent-sdk/overview)): paste a URL into
@@ -97,13 +97,14 @@ repository, because both live in *your* library folder:
 
 ## Install
 
-Download the DMG from [Releases](../../releases/latest), drag the app to
-Applications, start it. On first launch it asks for two things: where your
+Download the DMG from
+[Releases](https://github.com/sadilek/Funkuino/releases/latest), drag the app
+to Applications, start it. On first launch it asks for two things: where your
 library should live (a normal folder — put it on an external disk if you like)
 and your ESPuino's name or IP. Nothing else to install: the app carries its own
 Python runtime and a purpose-built ffmpeg.
 
-![First launch](docs/screenshots/einrichtung.png)
+![First launch](https://raw.githubusercontent.com/sadilek/Funkuino/main/docs/screenshots/einrichtung.png)
 
 **Two limitations to know before you download:**
 
@@ -122,7 +123,7 @@ There is no app bundle outside macOS, but Studio and every command are plain
 Python and run anywhere:
 
 ```bash
-pipx install git+https://github.com/sadilek/Funkuino.git
+pipx install funkuino
 sudo apt install ffmpeg        # or dnf/pacman/zypper — funkuino tells you which
 
 funkuino studio                # dashboard at http://127.0.0.1:8800
@@ -206,4 +207,4 @@ library conventions above. Only download content you are entitled to download.
 ## Credits & license
 
 Built around the excellent [ESPuino](https://github.com/biologist79/ESPuino) by
-biologist79 and contributors. Funkuino itself is [MIT-licensed](LICENSE).
+biologist79 and contributors. Funkuino itself is [MIT-licensed](https://github.com/sadilek/Funkuino/blob/main/LICENSE).

@@ -571,11 +571,12 @@ here have **no** `/SD-Card` prefix (that prefix only exists over FTP).
 The distribution for Linux (and, without the shell wrappers, Windows). Built
 with hatchling; `python -m build --wheel` produces it.
 
-**Not on PyPI yet** — the README therefore documents
-`pipx install git+https://github.com/sadilek/Funkuino.git`, which installs the
-same wheel from source. Uploading it (`twine upload dist/*`) would make
-`pipx install funkuino` work and is the only step left; the name is unclaimed
-as of this writing.
+Published on PyPI as **funkuino**, so the documented install is
+`pipx install funkuino`. Releasing: bump `version` in pyproject.toml (PyPI
+versions are immutable — a mistake costs a new number, never an overwrite),
+`python -m build`, `twine check --strict dist/*`, `twine upload dist/*`. The
+README is the long description, which is why its links and images are absolute
+URLs: relative ones resolve against the repository and break on PyPI.
 
 - **`scripts/` installs as the package `funkuino`** (`sources = {"scripts" =
   "funkuino"}`), but **nothing imports it as a package**. The console script is
