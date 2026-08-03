@@ -39,6 +39,7 @@ Funkuino/
   covers                # wrapper: extract title images into card-covers/
   cards                 # wrapper: lay out card-covers/ into printable PDFs
   studio                # wrapper: Funkuino Studio web app (dashboard + agent)
+  dev/shot.py           # headless screenshots of Studio (checkout-only, not shipped)
   pyproject.toml        # the wheel: pipx-installable (see Python package)
   hatch_build.py        # build hook: dependencies come from requirements.txt
   scripts/
@@ -450,6 +451,18 @@ cards), **Agent**, **Sync** (mirror with live log; Dry-Run always previews
 - A trivial agent turn costs ~$0.27 of subscription quota (the claude_code
   system preset + this CLAUDE.md ride along on every session) — fine for intake
   runs, just don't treat the Agent tab as a free chat window.
+
+**Looking at the UI without a browser**: `.venv/bin/python dev/shot.py
+[bibliothek|agent|sync|karten…]` starts a Studio against a throwaway library
+(seeded with one song, one Hörspiel and one album), drives headless Chrome over
+CDP, and writes PNGs to `dev/shots/`. `--no-ffmpeg` hides ffmpeg from the child
+so the missing-tool banner can be captured; `--keep` leaves both processes up
+with the URL printed. It holds **one** browser open and clicks the tabs, rather
+than calling `chrome --headless --screenshot` per view: that one-shot form
+writes its file and then often fails to exit (a loop over views wedges on the
+second), and it can only ever reach the landing view, since Studio's tabs are
+JS with no URL routing. Needs no new dependency — websocket-client is already
+there for the device websocket.
 
 ## Device HTTP API (what we use)
 

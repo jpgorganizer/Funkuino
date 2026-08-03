@@ -39,3 +39,6 @@ mac/Funkuino.icns
 dist/
 build/
 *.egg-info/
+
+# Headless screenshots (dev/shot.py output, regenerated on demand)
+dev/shots/
