@@ -572,11 +572,9 @@ The distribution for Linux (and, without the shell wrappers, Windows). Built
 with hatchling; `python -m build --wheel` produces it.
 
 Published on PyPI as **funkuino**, so the documented install is
-`pipx install funkuino`. Releasing: bump `version` in pyproject.toml (PyPI
-versions are immutable — a mistake costs a new number, never an overwrite),
-`python -m build`, `twine check --strict dist/*`, `twine upload dist/*`. The
-README is the long description, which is why its links and images are absolute
-URLs: relative ones resolve against the repository and break on PyPI.
+`pipx install funkuino` (see *Releasing* for how it gets there). The README is
+the long description, which is why its links and images are absolute URLs:
+relative ones resolve against the repository and break on PyPI.
 
 - **`scripts/` installs as the package `funkuino`** (`sources = {"scripts" =
   "funkuino"}`), but **nothing imports it as a package**. The console script is
@@ -653,6 +651,42 @@ mac/icon.py                      # renders the icon from the wordmark's wave mot
   exercises Gatekeeper — plain `cp` does not set the attribute, so nothing is
   checked; `xattr -w com.apple.quarantine "0083;00000000;Safari;" <app>`
   simulates a download.
+
+## Releasing
+
+Two artifacts, one version: `pyproject.toml` owns it and `mac/Makefile` derives
+`VERSION` from it, so bumping it there is the entire version step.
+
+1. Bump `version` in `pyproject.toml` and commit. **PyPI versions are
+   immutable** — a mistake costs a new number, it can never be overwritten.
+2. Build the wheel in a scratch venv holding `build` and `twine`: they are
+   release tools and deliberately not in `requirements.txt`, which is the
+   runtime list the app's embedded interpreter installs.
+   `python -m build` → `dist/`.
+3. **List the sdist before uploading**: `tar -tzf dist/*.tar.gz`. Hatchling
+   matches include patterns gitignore-style, and unanchored ones once pulled the
+   private overlay checked out beside this repo (`private/scripts/…`,
+   `private/README.md`) into the archive — `.git/info/exclude` does not protect
+   you, hatchling only reads `.gitignore`. The patterns are anchored now, but a
+   publish cannot be taken back, so look at the file list every time.
+4. `twine check --strict dist/*`, then `twine upload dist/*`. TestPyPI is a
+   *separate* registry with its own account, and `~/.pypirc` has only `[pypi]`;
+   a rehearsal there needs that set up first. Cheaper substitute, and what was
+   actually done for 0.1.0: install the built wheel into a throwaway venv and
+   run it before uploading.
+5. The app: `make release` in `mac/` (needs `DEV_ID` and `NOTARY_PROFILE`) —
+   signs, notarises, staples, and produces the signed DMG. One architecture per
+   build, so an Intel DMG means the same target on an Intel Mac.
+6. Attach the DMG(s) to the GitHub release. Then install the *published* wheel
+   somewhere clean (`pipx install funkuino` in a container) before announcing
+   it — the artifact on PyPI is what users get, not the one in `dist/`.
+
+**Why this stays local** (decided 2026-08-03, revisit if it chafes): moving it
+to GitHub Actions would mainly buy the Intel DMG, since `macos-13` runners
+still exist and the repo is public so macOS minutes are free. The price is the
+Developer ID certificate and an App Store Connect key living in repository
+secrets, where anything the workflow runs can sign in your name — worth it only
+with tag-only triggers and an environment protection rule.
 
 ## Roadmap / notes
 
