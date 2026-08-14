@@ -314,12 +314,15 @@ def write_text_atomically(path: Path, text: str) -> None:
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())
+
     tmp.replace(path)
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+
+    if os.name != "nt":
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def keep_backup(path: Path) -> None:
@@ -596,6 +599,7 @@ class ESPuino:
         file). We therefore scale the socket timeout to the file size (assuming a
         conservative ~40 KiB/s floor). A single timeout value covers connect,
         send AND read, so the slow body send is not cut off."""
+        remote_path = "/" + remote_path.lstrip("/")
         data = Path(local_path).read_bytes()  # in-memory => explicit Content-Length
         timeout = max(self.timeout, len(data) // (40 * 1024))
         # The device occasionally resets a connection mid-request; retry a couple
