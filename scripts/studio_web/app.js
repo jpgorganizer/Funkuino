@@ -175,6 +175,24 @@ async function api(path, method = "GET", body) {
 
 /* =============================== 3. state + WS =============================== */
 
+const SORT_MODE_KEY = "funkuino:sortMode";
+
+// localStorage can throw (private browsing, disabled storage) — default to
+// "date" (the original, unchanged behaviour) rather than let that crash init.
+function loadSortMode() {
+  try {
+    return localStorage.getItem(SORT_MODE_KEY) === "alpha" ? "alpha" : "date";
+  } catch {
+    return "date";
+  }
+}
+
+function saveSortMode(mode) {
+  try {
+    localStorage.setItem(SORT_MODE_KEY, mode);
+  } catch { /* ignore: not persisted this session, still applied in-memory */ }
+}
+
 const State = {
   /** @type {StatePayload|null} */ data: null,   // last /api/state payload
   lastSeq: 0,                       // highest applied global seq
@@ -186,6 +204,7 @@ const State = {
   /** @type {Set<string>|null} */ knownUnitIds: null,    // prev fetch's ids; new ones flash
   /** @type {Player|null} */ player: null,               // now-playing on the device
   /** @type {{cards?: boolean, agent?: boolean}} */ features: {},  // server-side feature flags
+  /** @type {"date"|"alpha"} */ sortMode: loadSortMode(), // library sort, persisted client-side
   _reconnecting: false,
 };
 
@@ -353,6 +372,10 @@ function appendLog(id, line, isErr) {
 
 /** @type {Record<string, string>} */
 const KIND_LABEL = { song: "Lied", album: "Album", folge: "Folge", hoerspiel: "Hörspiel", other: "Sonstiges" };
+// German phonebook order (DIN 5007-2): ä/ö/ü sort as "ae"/"oe"/"ue", not as
+// plain a/o/u (that would be dictionary order, DIN 5007-1). `numeric: true`
+// additionally makes "Folge 2" sort before "Folge 10".
+const deCollator = new Intl.Collator("de-u-co-phonebk", { sensitivity: "base", numeric: true });
 
 /** @param {Unit} unit */
 function thumbFor(unit) {
@@ -550,8 +573,22 @@ function renderLibrary() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(u);
   }
-  const groupMtime = (/** @type {Unit[]} */ arr) => Math.max(...arr.map(u => u.mtime || 0));
-  const ordered = Array.from(groups.entries()).sort((a, b) => groupMtime(b[1]) - groupMtime(a[1]));
+  const LOOSE_GROUP = KIND_LABEL.other;  // "Sonstiges": top-level mp3s with no series
+
+  let ordered;
+  if (State.sortMode === "alpha") {
+    // Folders alphabetical first (German phonebook order), the loose
+    // "Sonstiges" bucket always last.
+    ordered = Array.from(groups.entries()).sort((a, b) => {
+      const aLoose = a[0] === LOOSE_GROUP, bLoose = b[0] === LOOSE_GROUP;
+      if (aLoose !== bLoose) return aLoose ? 1 : -1;
+      return deCollator.compare(a[0], b[0]);
+    });
+  } else {
+    // Original default: groups newest-first.
+    const groupMtime = (/** @type {Unit[]} */ arr) => Math.max(...arr.map(u => u.mtime || 0));
+    ordered = Array.from(groups.entries()).sort((a, b) => groupMtime(b[1]) - groupMtime(a[1]));
+  }
 
   // Flash rows whose id wasn't in the previous fetch (e.g. a fresh download).
   const prev = State.knownUnitIds;
@@ -587,7 +624,20 @@ function renderLibrary() {
   const playingId = (pl && (pl.playing || pl.pausePlay) && pl.unitId) || null;
   const tbody = el("tbody");
   for (const [name, arr] of ordered) {
-    arr.sort((/** @type {Unit} */ a, /** @type {Unit} */ b) => (b.mtime || 0) - (a.mtime || 0));
+    if (State.sortMode === "alpha") {
+      // Within a series group, subfolder-based units ("folge", themselves a
+      // folder of files) sort before direct-file units ("hoerspiel", a single
+      // mp3 straight in the series folder) — folders first, titles after, as
+      // for other kinds (song/album/other) every item shares the same kind so
+      // this comparison is a no-op and only the title compare below applies.
+      arr.sort((/** @type {Unit} */ a, /** @type {Unit} */ b) => {
+        const aFolder = a.kind === "folge", bFolder = b.kind === "folge";
+        if (aFolder !== bFolder) return aFolder ? -1 : 1;
+        return deCollator.compare(a.title || a.id || "", b.title || b.id || "");
+      });
+    } else {
+      arr.sort((/** @type {Unit} */ a, /** @type {Unit} */ b) => (b.mtime || 0) - (a.mtime || 0));
+    }
     tbody.append(el("tr", { class: "grouprow" },
       el("td", { colspan: String(colCount) },
         document.createTextNode(name + "  "),
@@ -1855,11 +1905,28 @@ function initSyncCards() {
   $("#pick-render").addEventListener("click", renderCardsPage);
 }
 
+function updateSortToggleLabel() {
+  const btn = $("#lib-sort-toggle");
+  if (!btn) return;
+  const alpha = State.sortMode === "alpha";
+  btn.textContent = alpha ? "Sortierung: A–Z" : "Sortierung: Datum";
+  btn.title = alpha
+    ? "Alphabetisch (deutsche Telefonbuchsortierung) — Ordner zuerst, Titel zuletzt. Klick: nach Datum sortieren."
+    : "Neueste zuerst. Klick: alphabetisch sortieren (deutsche Telefonbuchsortierung).";
+}
+
 function initLibrary() {
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let t;
   $("#lib-search").addEventListener("input", () => { clearTimeout(t); t = setTimeout(renderLibrary, 120); });
   $("#lib-refresh").addEventListener("click", () => refreshState(true));
+  updateSortToggleLabel();  // reflect the persisted mode on first paint
+  $("#lib-sort-toggle").addEventListener("click", () => {
+    State.sortMode = State.sortMode === "alpha" ? "date" : "alpha";
+    saveSortMode(State.sortMode);
+    updateSortToggleLabel();
+    renderLibrary();
+  });
   $("#lib-load").addEventListener("click", () => startLibraryDownload($("#lib-url").value));
   $("#lib-url").addEventListener("keydown", (/** @type {any} */ e) => { if (e.key === "Enter") startLibraryDownload(e.target.value); });
   $("#agent-token-save").addEventListener("click", saveAgentToken);
