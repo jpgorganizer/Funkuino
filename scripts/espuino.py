@@ -494,12 +494,20 @@ def cover_path_for(media_path: str | Path, lib_dir: str | Path,
 def join_remote(base: str, *parts: str) -> str:
     """Join remote path parts using POSIX separators, keeping a leading '/'.
 
+    The device always needs an absolute path, but ``base`` (typically
+    ``cfg.remote_root``) is not guaranteed to start with one -- the default
+    "/" does, but a non-default root like "mp3" does not, and joining onto it
+    directly used to yield a relative-looking "mp3/..." that the device
+    silently failed to resolve (playback: 200 OK, nothing plays; listing: an
+    incomplete top-level scan). Normalising ``base`` itself here fixes every
+    caller at once instead of requiring each one to remember to do it.
+
     The result is Unicode-normalised to NFC because the device stores names in
     NFC while macOS hands us decomposed (NFD) names from the local filesystem;
     without this, e.g. 'Frühling' (device) would never match 'Frühling'
     (local) and every accented file would look missing and be re-uploaded.
     """
-    path = base
+    path = "/" + str(base).lstrip("/")
     for part in parts:
         if part in ("", "."):
             continue
@@ -569,6 +577,10 @@ class ESPuino:
     def walk(self, root: str) -> Iterator[tuple[str, bool]]:
         """Depth-first walk yielding (path, is_dir); dirs come after their
         contents so they can be removed safely."""
+        root = join_remote(root)  # normalise once: recursive calls already
+                                   # pass an already-normalised path via
+                                   # join_remote(root, name) below, but the
+                                   # very first, top-level call needs it too
         for name, is_dir in self.list_dir(root):
             path = join_remote(root, name)
             if is_dir:
@@ -598,8 +610,11 @@ class ESPuino:
         timeout then aborts a big upload part-way (the device keeps a truncated
         file). We therefore scale the socket timeout to the file size (assuming a
         conservative ~40 KiB/s floor). A single timeout value covers connect,
-        send AND read, so the slow body send is not cut off."""
-        remote_path = "/" + remote_path.lstrip("/")
+        send AND read, so the slow body send is not cut off.
+
+        ``remote_path`` is expected to already be a device-absolute path (as
+        produced by join_remote); this method itself no longer re-normalises
+        it -- see join_remote for why that used to be necessary."""
         data = Path(local_path).read_bytes()  # in-memory => explicit Content-Length
         timeout = max(self.timeout, len(data) // (40 * 1024))
         # The device occasionally resets a connection mid-request; retry a couple

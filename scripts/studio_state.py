@@ -53,18 +53,29 @@ def _nfc(text: str) -> str:
 DEFAULT_PLAYMODE = {"song": 1, "hoerspiel": 3, "album": 5, "folge": 5, "other": 3}
 
 
-def assignment_key(file_or_url: str) -> str:
+def assignment_key(file_or_url: str, remote_root: str = espuino.DEFAULT_REMOTE_ROOT) -> str:
     """An RFID assignment's ``fileOrUrl`` -> unit-id key: strip the leading
-    slash and NFC-normalise, so it can be matched against a unit's ``id``."""
-    return _nfc(str(file_or_url or "").lstrip("/"))
+    slash, the configured remote_root prefix (join_remote's counterpart --
+    without this, any ESPUINO_REMOTE_ROOT other than the default "/" makes
+    every assignment key mismatch its unit id, e.g. "mp3/Lieder/x.mp3" never
+    matching the unit id "Lieder/x.mp3"), and NFC-normalise."""
+    s = _nfc(str(file_or_url or "").lstrip("/"))
+    root = _nfc(str(remote_root or "").strip("/"))
+    if root:
+        if s == root:
+            s = ""
+        elif s.startswith(root + "/"):
+            s = s[len(root) + 1:]
+    return s
 
 
-def build_card_map(assignments: list[dict]) -> dict[str, list[str]]:
+def build_card_map(assignments: list[dict],
+                   remote_root: str = espuino.DEFAULT_REMOTE_ROOT) -> dict[str, list[str]]:
     """From ``GET /rfid`` entries, map unit-id key -> assigned card ids. Entries
     whose path matches no unit are simply never looked up by :func:`scan`."""
     out: dict[str, list[str]] = {}
     for a in assignments:
-        key = assignment_key(a.get("fileOrUrl", ""))
+        key = assignment_key(a.get("fileOrUrl", ""), remote_root)
         if key:
             out.setdefault(key, []).append(str(a.get("id")))
     return out
