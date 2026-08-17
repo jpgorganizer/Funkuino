@@ -156,10 +156,13 @@ def parse_env(path: Path) -> dict[str, str]:
 
 class Studio:
     def __init__(self, cfg: espuino.Config, token: str | None,
-                 port: int = DEFAULT_PORT):
+                 port: int = DEFAULT_PORT, cards_enabled: bool = True,
+                 agent_enabled: bool = True):
         self.cfg = cfg
         self.token = token
         self.port = port
+        self.cards_enabled = cards_enabled  # --no-cards: hide print tab/column, 404 its API
+        self.agent_enabled = agent_enabled  # --no-agent: hide agent tab, 404 its API
         self.loop: asyncio.AbstractEventLoop | None = None
         self.agent: studio_agent.SessionManager | None = None
 
@@ -551,9 +554,22 @@ class Studio:
     # -- HTTP handlers -------------------------------------------------------
     async def h_index(self, request: web.Request) -> web.StreamResponse:
         index = WEB_DIR / "index.html"
-        if index.is_file():
-            return web.FileResponse(index)
-        return web.Response(text=PLACEHOLDER, content_type="text/plain")
+        if not index.is_file():
+            return web.Response(text=PLACEHOLDER, content_type="text/plain")
+        # Injecting `hidden` here (not just client-side in app.js) means a
+        # disabled tab is never painted at all -- no first-paint flash while
+        # the initial /api/state round-trip (device ping + library scan) is
+        # still in flight.
+        html = index.read_text(encoding="utf-8")
+        if not self.cards_enabled:
+            html = html.replace(
+                '<button class="tab" data-tab="karten" role="tab">',
+                '<button class="tab" data-tab="karten" role="tab" hidden>')
+        if not self.agent_enabled:
+            html = html.replace(
+                '<button class="tab" data-tab="agent" role="tab">',
+                '<button class="tab" data-tab="agent" role="tab" hidden>')
+        return web.Response(text=html, content_type="text/html")
 
     async def h_static(self, request: web.Request) -> web.StreamResponse:
         name = request.match_info["name"]
@@ -623,6 +639,7 @@ class Studio:
             "rfid": {"listening": self.rfid_listening},
             "player": self._player,
             "tools": {"ffmpeg": self._ffmpeg_state()},
+            "features": {"cards": self.cards_enabled, "agent": self.agent_enabled},
         })
 
     def _ffmpeg_state(self) -> dict:
@@ -711,11 +728,15 @@ class Studio:
 
     # -- cards jobs (shell out to the dispatcher, bin/funkuino) --
     async def h_cards_print(self, request: web.Request) -> web.Response:
+        if not self.cards_enabled:
+            raise web.HTTPNotFound()
         body = await _json_body(request)
         return await self._start_cards(["cards", "--dry-run"] if body.get("dryRun")
                                        else ["cards"])
 
     async def h_cards_undo(self, request: web.Request) -> web.Response:
+        if not self.cards_enabled:
+            raise web.HTTPNotFound()
         return await self._start_cards(["cards", "--undo"])
 
     async def _start_cards(self, argv: list[str]) -> web.Response:
@@ -777,6 +798,8 @@ class Studio:
 
     # -- integrated card picker (covers listing + render) --
     async def h_cards_covers(self, request: web.Request) -> web.Response:
+        if not self.cards_enabled:
+            raise web.HTTPNotFound()
         data = await self.loop.run_in_executor(None, self._cards_covers)
         return web.json_response(data)
 
@@ -807,6 +830,8 @@ class Studio:
         return {"covers": items, "perPage": per_page, "lastRun": last_run}
 
     async def h_cards_render(self, request: web.Request) -> web.Response:
+        if not self.cards_enabled:
+            raise web.HTTPNotFound()
         body = await _json_body(request)
         rels = [str(r) for r in body.get("rels", []) if r]
         if not rels:
@@ -1042,6 +1067,8 @@ class Studio:
 
     # -- agent endpoints --
     def _agent_ready(self) -> web.Response | None:
+        if not self.agent_enabled:
+            raise web.HTTPNotFound()
         if not (self.agent and self.agent.available):
             return web.json_response(
                 {"error": "SDK_TOKEN fehlt in .env"}, status=503)
@@ -1123,6 +1150,8 @@ class Studio:
         return web.json_response({"ok": True})
 
     async def h_agent_token(self, request: web.Request) -> web.Response:
+        if not self.agent_enabled:
+            raise web.HTTPNotFound()
         """Store (or clear) the agent's access token from the UI.
 
         It lands in the data folder's .env, the same place the server reads at
@@ -1307,6 +1336,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", help="ESPuino device host/IP override")
     parser.add_argument("--no-browser", action="store_true",
                         help="Do not open a browser tab on start")
+    parser.add_argument("--no-cards", action="store_true",
+                        help="Hide the card-printing tab and column (feature disabled)")
+    parser.add_argument("--no-agent", action="store_true",
+                        help="Hide the agent tab (feature disabled)")
     args = parser.parse_args(argv)
 
     token = parse_env(espuino.credentials_file()).get("SDK_TOKEN")
@@ -1315,7 +1348,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("CLAUDE_CODE_OAUTH_TOKEN", token)
 
     cfg = espuino.Config.from_env(host=args.host)
-    studio = Studio(cfg, token, port=args.port)
+    studio = Studio(cfg, token, port=args.port, cards_enabled=not args.no_cards,
+                    agent_enabled=not args.no_agent)
     app = studio.build_app()
 
     url = f"http://127.0.0.1:{args.port}/"

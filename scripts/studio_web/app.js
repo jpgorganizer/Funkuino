@@ -185,6 +185,7 @@ const State = {
   /** @type {Map<string, number>} */ unitSyncPct: new Map(), // unit id -> latest sync percent
   /** @type {Set<string>|null} */ knownUnitIds: null,    // prev fetch's ids; new ones flash
   /** @type {Player|null} */ player: null,               // now-playing on the device
+  /** @type {{cards?: boolean, agent?: boolean}} */ features: {},  // server-side feature flags
   _reconnecting: false,
 };
 
@@ -276,6 +277,8 @@ async function refreshState(refresh) {
     State.unitSync = new Set((s.jobs && s.jobs.unitSync) || []);
     for (const id of [...State.unitSyncPct.keys()]) if (!State.unitSync.has(id)) State.unitSyncPct.delete(id);
     State.player = s.player || null;
+    State.features = s.features || {};
+    applyFeatureVisibility();
     renderDeviceChip(s.device);
     renderToolBanner(s.tools);
     renderLibrary();
@@ -299,6 +302,20 @@ function isTabActive(name) {
 }
 
 /* =============================== 4. tabs + toasts =============================== */
+
+// Hides the Kartendruck tab (and, via renderLibrary, its Druck column) when the
+// server was started with --no-cards. Idempotent: safe to call on every state
+// refresh, and bounces the user off the tab if it was active when disabled.
+function applyFeatureVisibility() {
+  const cardsOn = State.features.cards !== false;
+  const agentOn = State.features.agent !== false;
+  const tabBtn = $$(".tab").find(b => b.dataset.tab === "karten");
+  if (tabBtn) tabBtn.hidden = !cardsOn;
+  if (!cardsOn && isTabActive("karten")) activateTab("bibliothek");
+  const agentBtn = $$(".tab").find(b => b.dataset.tab === "agent");
+  if (agentBtn) agentBtn.hidden = !agentOn;
+  if (!agentOn && isTabActive("agent")) activateTab("bibliothek");
+}
 
 function initTabs() {
   $$(".tab").forEach(btn => btn.addEventListener("click", () => {
@@ -488,7 +505,9 @@ function libColgroup() {
   // Thumb column: the 44px image plus its 14px left padding — with a fixed
   // layout the column no longer grows to fit them and the cover would collide
   // with the title.
-  const cols = [56, 56, 56, 56, 56, 58, null, 40];
+  const cardsOn = State.features.cards !== false;
+  const pipeCols = cardsOn ? [56, 56, 56, 56, 56] : [56, 56, 56, 56];  // Down/Cover/Sync/(Druck)/Karte
+  const cols = [...pipeCols, 58, null, 40];
   return el("colgroup", null, ...cols.map(w =>
     el("col", w === null ? null : { style: `width:${w}px` })));
 }
@@ -524,7 +543,7 @@ function renderLibrary() {
     return;
   }
 
-  // Group by series (fallback: kind label). Groups newest-first; rows newest-first.
+  // Group by series (fallback: kind label).
   const groups = new Map();
   for (const u of filtered) {
     const key = u.series || KIND_LABEL[u.kind] || "Sonstiges";
@@ -540,17 +559,24 @@ function renderLibrary() {
 
   // Row order (per user feedback): status block LEFT, then thumbnail, then title.
   const syncHost = (s && s.syncManifest && s.syncManifest.host) || "";
-  const headTable = el("table", { class: "lib-table" });
-  headTable.append(libColgroup());
-  headTable.append(el("thead", null, el("tr", null,
+  const cardsOn = State.features.cards !== false;
+  const colCount = cardsOn ? 8 : 7;  // grouprow colspan must track the pipe-cell count below
+  const headCells = [
     el("th", { class: "col-pipe", text: "Down", title: "Audio heruntergeladen" }),
     el("th", { class: "col-pipe", text: "Cover", title: "Titelbild für die Karte" }),
     el("th", { class: "col-pipe", text: "Sync", title: syncHost ? "Gerät: " + syncHost : "Auf dem Gerät" }),
-    el("th", { class: "col-pipe", text: "Druck", title: "RFID-Karte gedruckt" }),
+  ];
+  if (cardsOn) {
+    headCells.push(el("th", { class: "col-pipe", text: "Druck", title: "RFID-Karte gedruckt" }));
+  }
+  headCells.push(
     el("th", { class: "col-pipe", text: "Karte", title: "RFID-Karte zugeordnet" }),
     el("th", { class: "col-thumb", text: "Titel", colspan: "2" }),
     el("th", { class: "col-play" }),
-  )));
+  );
+  const headTable = el("table", { class: "lib-table" });
+  headTable.append(libColgroup());
+  headTable.append(el("thead", null, el("tr", null, ...headCells)));
   head.append(headTable);
 
   const table = el("table", { class: "lib-table" });
@@ -563,13 +589,16 @@ function renderLibrary() {
   for (const [name, arr] of ordered) {
     arr.sort((/** @type {Unit} */ a, /** @type {Unit} */ b) => (b.mtime || 0) - (a.mtime || 0));
     tbody.append(el("tr", { class: "grouprow" },
-      el("td", { colspan: "8" },
+      el("td", { colspan: String(colCount) },
         document.createTextNode(name + "  "),
         el("span", { class: "gcount", text: arr.length + " Titel" }))));
     for (const u of arr) {
       const playing = u.id === playingId;
+      const rowCells = [pipeCell("download", u), pipeCell("cover", u), pipeCell("sync", u)];
+      if (cardsOn) rowCells.push(pipeCell("print", u));
+      rowCells.push(pipeCell("card", u));
       tbody.append(el("tr", { class: "unitrow" + (isNew(u.id) ? " flash-new" : "") + (playing ? " playing" : "") },
-        pipeCell("download", u), pipeCell("cover", u), pipeCell("sync", u), pipeCell("print", u), pipeCell("card", u),
+        ...rowCells,
         el("td", { class: "col-thumb" }, thumbFor(u)),
         el("td", null,
           el("div", { class: "unit-title", text: u.title || u.id || "ohne Titel" }),
