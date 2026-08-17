@@ -350,7 +350,7 @@ class Studio:
         stripped = _TRACK_PREFIX_RE.sub("", name or "").strip()
         if "/" not in stripped:
             return None                             # an ID3 title, not a path
-        cand = studio_state.assignment_key(stripped)  # strip leading slash + NFC
+        cand = studio_state.assignment_key(stripped, self.cfg.remote_root)  # strip leading slash + remote_root + NFC
         if cand in self._unit_ids:
             return cand
         best = None
@@ -515,7 +515,7 @@ class Studio:
         sync_state, meta = studio_state.pick_manifest(sync.STATE_DIR)
         print_state = PrintState.load(cards.STATE_FILE)
         # Only attach card ids once we have ever read /rfid; otherwise omit them.
-        card_map = (studio_state.build_card_map(self._assignments)
+        card_map = (studio_state.build_card_map(self._assignments, self.cfg.remote_root)
                     if self._assignments is not None else None)
         units = studio_state.scan(self.cfg, sync_state, print_state,
                                   card_map=card_map)
@@ -530,7 +530,7 @@ class Studio:
     # -- RFID assignments cache --
     def _enrich_assignment(self, a: dict) -> dict:
         """Add the resolved unitId (or None) to a raw /rfid entry."""
-        key = studio_state.assignment_key(a.get("fileOrUrl", ""))
+        key = studio_state.assignment_key(a.get("fileOrUrl", ""), self.cfg.remote_root)
         return {"id": str(a.get("id")), "fileOrUrl": a.get("fileOrUrl"),
                 "playMode": a.get("playMode"),
                 "unitId": key if key in self._unit_ids else None}
