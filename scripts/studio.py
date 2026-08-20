@@ -886,6 +886,7 @@ class Studio:
                     cards.cm(cards.RECTANGULAR_CONTENT_WIDTH_CM),
                     cards.cm(cards.RECTANGULAR_CONTENT_HEIGHT_CM),
                     cards.cm(cards.RECTANGULAR_TOP_BLEED_CM),
+                    cards.cm(cards.RECTANGULAR_BOTTOM_BLEED_CM),
                     trim=True,
                     distortion=self.rectangular_cards,
                 )

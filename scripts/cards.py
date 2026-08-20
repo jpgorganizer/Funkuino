@@ -50,10 +50,11 @@ DEFAULT_DISTORTION = 0.02
 # Optional rectangular card format:
 # 8x6 cm print format, resulting in an 8x5 cm finished card.
 RECTANGULAR_PRINT_WIDTH_CM = 8.2
-RECTANGULAR_PRINT_HEIGHT_CM = 5.7
+RECTANGULAR_PRINT_HEIGHT_CM = 6.2
 RECTANGULAR_CONTENT_WIDTH_CM = 8.2
 RECTANGULAR_CONTENT_HEIGHT_CM = 5.2
 RECTANGULAR_TOP_BLEED_CM = 0.5
+RECTANGULAR_BOTTOM_BLEED_CM = 0.5
 RECTANGULAR_COLS = 2
 # Minimum white space kept between the card block and the paper edge, so home
 # printers (which cannot print to the very edge) never clip a card.
@@ -114,7 +115,7 @@ def _stretch_edge(
     im: Image.Image,
     side: str,
     amount: int,
-    distortion: float = 0.02,
+    distortion: float = DEFAULT_DISTORTION,
 ) -> Image.Image:
     """Extend an image by stretching a strip from one of its edges."""
     if amount <= 0:
@@ -146,7 +147,7 @@ def _extend_to_size(
     im: Image.Image,
     target_w: int,
     target_h: int,
-    distortion: float = 0.02,
+    distortion: float = DEFAULT_DISTORTION,
 ) -> Image.Image:
     """Fit proportionally and fill unused space by stretching image edges.
 
@@ -241,25 +242,43 @@ def _extend_to_size(
     return out
 
 
-def _add_top_bleed(
+def _add_bleed(
     im: Image.Image,
-    bleed_px: int,
-    distortion: float = 0.02,
+    top_bleed_px: int,
+    bottom_bleed_px: int,
+    distortion: float = DEFAULT_DISTORTION,
 ) -> Image.Image:
-    """Add the extra 1 cm above the finished card by edge stretching."""
-    if bleed_px <= 0:
+    """Add top and bottom bleed by stretching the respective image edges."""
+    if top_bleed_px <= 0 and bottom_bleed_px <= 0:
         return im
 
-    bleed = _stretch_edge(
-        im,
-        "top",
-        bleed_px,
-        distortion,
+    top_bleed = (
+        _stretch_edge(im, "top", top_bleed_px, distortion)
+        if top_bleed_px > 0
+        else None
+    )
+    bottom_bleed = (
+        _stretch_edge(im, "bottom", bottom_bleed_px, distortion)
+        if bottom_bleed_px > 0
+        else None
     )
 
-    out = Image.new("RGB", (im.width, im.height + bleed_px))
-    out.paste(bleed, (0, 0))
-    out.paste(im, (0, bleed_px))
+    out = Image.new(
+        "RGB",
+        (im.width, im.height + top_bleed_px + bottom_bleed_px),
+    )
+
+    if top_bleed is not None:
+        out.paste(top_bleed, (0, 0))
+
+    out.paste(im, (0, top_bleed_px))
+
+    if bottom_bleed is not None:
+        out.paste(
+            bottom_bleed,
+            (0, top_bleed_px + im.height),
+        )
+
     return out
 
 def prepare_rectangular_card(
@@ -267,8 +286,9 @@ def prepare_rectangular_card(
     content_width_px: int,
     content_height_px: int,
     top_bleed_px: int,
+    bottom_bleed_px: int,
     trim: bool = True,
-    distortion: float = 0.02,
+    distortion: float = DEFAULT_DISTORTION,
 ) -> Image.Image:
     """Prepare an 8x5 finished card on 8x6 cm print stock."""
     im = Image.open(path).convert("RGB")
@@ -283,9 +303,10 @@ def prepare_rectangular_card(
         distortion,
     )
 
-    return _add_top_bleed(
+    return _add_bleed(
         content,
         top_bleed_px,
+        bottom_bleed_px,
         distortion,
     )
 
@@ -389,7 +410,7 @@ def render_rectangular_pages(
     covers: list[Path],
     marks: bool,
     trim: bool,
-    distortion: float = 0.02,
+    distortion: float = DEFAULT_DISTORTION,
     log=print,
 ) -> list[Image.Image]:
     """Render 8x5 cm finished cards onto 8x6 cm print stock."""
@@ -402,6 +423,7 @@ def render_rectangular_pages(
     content_w = cm(RECTANGULAR_CONTENT_WIDTH_CM)
     content_h = cm(RECTANGULAR_CONTENT_HEIGHT_CM)
     top_bleed = cm(RECTANGULAR_TOP_BLEED_CM)
+    bottom_bleed = cm(RECTANGULAR_BOTTOM_BLEED_CM)
 
     cols = RECTANGULAR_COLS
 
@@ -434,6 +456,7 @@ def render_rectangular_pages(
                 content_w,
                 content_h,
                 top_bleed,
+                bottom_bleed,
                 trim=trim,
                 distortion=distortion,
             )
