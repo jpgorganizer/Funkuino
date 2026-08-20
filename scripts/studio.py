@@ -557,9 +557,10 @@ class Studio:
         if not index.is_file():
             return web.Response(text=PLACEHOLDER, content_type="text/plain")
         # Injecting `hidden` here (not just client-side in app.js) means a
-        # disabled tab is never painted at all -- no first-paint flash while
-        # the initial /api/state round-trip (device ping + library scan) is
-        # still in flight.
+        # disabled tab -- or, for --no-agent, the library toolbar's URL-download
+        # field too -- is never painted at all: no first-paint flash while the
+        # initial /api/state round-trip (device ping + library scan) is still
+        # in flight.
         html = index.read_text(encoding="utf-8")
         if not self.cards_enabled:
             html = html.replace(
@@ -569,6 +570,9 @@ class Studio:
             html = html.replace(
                 '<button class="tab" data-tab="agent" role="tab">',
                 '<button class="tab" data-tab="agent" role="tab" hidden>')
+            html = html.replace(
+                '<span class="lib-dl">',
+                '<span class="lib-dl" hidden>')
         return web.Response(text=html, content_type="text/html")
 
     async def h_static(self, request: web.Request) -> web.StreamResponse:

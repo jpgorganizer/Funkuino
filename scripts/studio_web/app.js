@@ -304,8 +304,12 @@ function isTabActive(name) {
 /* =============================== 4. tabs + toasts =============================== */
 
 // Hides the Kartendruck tab (and, via renderLibrary, its Druck column) when the
-// server was started with --no-cards. Idempotent: safe to call on every state
-// refresh, and bounces the user off the tab if it was active when disabled.
+// server was started with --no-cards, and the Agent tab plus the library
+// toolbar's URL-download field when started with --no-agent -- the latter is
+// a second entry point into the same agent-only /api/agent/sessions endpoint
+// (startLibraryDownload), easy to overlook since it lives in the Bibliothek
+// tab, not the Agent tab itself. Idempotent: safe to call on every state
+// refresh, and bounces the user off a tab if it was active when disabled.
 function applyFeatureVisibility() {
   const cardsOn = State.features.cards !== false;
   const agentOn = State.features.agent !== false;
@@ -315,6 +319,8 @@ function applyFeatureVisibility() {
   const agentBtn = $$(".tab").find(b => b.dataset.tab === "agent");
   if (agentBtn) agentBtn.hidden = !agentOn;
   if (!agentOn && isTabActive("agent")) activateTab("bibliothek");
+  const libDl = document.querySelector(".lib-dl");
+  if (libDl) libDl.hidden = !agentOn;
 }
 
 function initTabs() {
