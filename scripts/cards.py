@@ -45,6 +45,16 @@ DPI = 300
 A4_CM = (21.0, 29.7)
 DEFAULT_CARD_CM = 6.0
 DEFAULT_COLS = 3
+DEFAULT_DISTORTION = 0.02
+
+# Optional rectangular card format:
+# 8x6 cm print format, resulting in an 8x5 cm finished card.
+RECTANGULAR_PRINT_WIDTH_CM = 8.2
+RECTANGULAR_PRINT_HEIGHT_CM = 5.7
+RECTANGULAR_CONTENT_WIDTH_CM = 8.2
+RECTANGULAR_CONTENT_HEIGHT_CM = 5.2
+RECTANGULAR_TOP_BLEED_CM = 0.5
+RECTANGULAR_COLS = 2
 # Minimum white space kept between the card block and the paper edge, so home
 # printers (which cannot print to the very edge) never clip a card.
 PAGE_MARGIN_CM = 0.7
@@ -100,6 +110,184 @@ def prepare_card(path: Path, size_px: int, trim: bool = True) -> Image.Image:
         im = im.resize((size_px, size_px), Image.LANCZOS)
     return im
 
+def _stretch_edge(
+    im: Image.Image,
+    side: str,
+    amount: int,
+    distortion: float = 0.02,
+) -> Image.Image:
+    """Extend an image by stretching a strip from one of its edges."""
+    if amount <= 0:
+        return Image.new("RGB", (1, 1))
+
+    w, h = im.size
+    fraction = distortion
+
+    if side in ("left", "right"):
+        strip_w = max(1, min(w, round(w * fraction)))
+        if side == "left":
+            strip = im.crop((0, 0, strip_w, h))
+        else:
+            strip = im.crop((w - strip_w, 0, w, h))
+        return strip.resize((amount, h), Image.Resampling.LANCZOS)
+
+    if side in ("top", "bottom"):
+        strip_h = max(1, min(h, round(h * fraction)))
+        if side == "top":
+            strip = im.crop((0, 0, w, strip_h))
+        else:
+            strip = im.crop((0, h - strip_h, w, h))
+        return strip.resize((w, amount), Image.Resampling.LANCZOS)
+
+    raise ValueError(f"Unknown edge: {side}")
+
+
+def _extend_to_size(
+    im: Image.Image,
+    target_w: int,
+    target_h: int,
+    distortion: float = 0.02,
+) -> Image.Image:
+    """Fit proportionally and fill unused space by stretching image edges.
+
+    The original image is never cropped or non-proportionally distorted.
+
+    Square images are fitted by height. Thus an 8x5 target becomes a
+    5x5 original image with 1.5 cm stretched to each side.
+    """
+    w, h = im.size
+    if w <= 0 or h <= 0:
+        raise ValueError("Image has invalid dimensions")
+
+    if w == h:
+        # Important: square images should be 5x5 cm, not 8x8 cm.
+        scale = target_h / h
+    else:
+        scale = min(target_w / w, target_h / h)
+
+    fitted_w = max(1, round(w * scale))
+    fitted_h = max(1, round(h * scale))
+    fitted = im.resize((fitted_w, fitted_h), Image.Resampling.LANCZOS)
+
+    extra_w = target_w - fitted_w
+    extra_h = target_h - fitted_h
+
+    left = extra_w // 2
+    right = extra_w - left
+    top = extra_h // 2
+    bottom = extra_h - top
+
+    out = Image.new("RGB", (target_w, target_h))
+    out.paste(fitted, (left, top))
+
+    if left:
+        out.paste(_stretch_edge(fitted, "left", left, distortion), (0, top))
+
+    if right:
+        out.paste(
+            _stretch_edge(fitted, "right", right, distortion),
+            (left + fitted_w, top),
+        )
+
+    if top:
+        out.paste(_stretch_edge(fitted, "top", top, distortion), (left, 0))
+
+    if bottom:
+        out.paste(
+            _stretch_edge(fitted, "bottom", bottom, distortion),
+            (left, top + fitted_h),
+        )
+
+    # Fill corner areas if both horizontal and vertical extension were needed.
+    if left and top:
+        corner = out.crop((0, top, left, top + 1))
+        out.paste(
+            corner.resize((left, top), Image.Resampling.LANCZOS),
+            (0, 0),
+        )
+
+    if right and top:
+        corner = out.crop(
+            (target_w - right, top, target_w, top + 1)
+        )
+        out.paste(
+            corner.resize((right, top), Image.Resampling.LANCZOS),
+            (target_w - right, 0),
+        )
+
+    if left and bottom:
+        corner = out.crop(
+            (0, target_h - bottom, left, target_h - bottom + 1)
+        )
+        out.paste(
+            corner.resize((left, bottom), Image.Resampling.LANCZOS),
+            (0, target_h - bottom),
+        )
+
+    if right and bottom:
+        corner = out.crop(
+            (
+                target_w - right,
+                target_h - bottom,
+                target_w,
+                target_h - bottom + 1,
+            )
+        )
+        out.paste(
+            corner.resize((right, bottom), Image.Resampling.LANCZOS),
+            (target_w - right, target_h - bottom),
+        )
+
+    return out
+
+
+def _add_top_bleed(
+    im: Image.Image,
+    bleed_px: int,
+    distortion: float = 0.02,
+) -> Image.Image:
+    """Add the extra 1 cm above the finished card by edge stretching."""
+    if bleed_px <= 0:
+        return im
+
+    bleed = _stretch_edge(
+        im,
+        "top",
+        bleed_px,
+        distortion,
+    )
+
+    out = Image.new("RGB", (im.width, im.height + bleed_px))
+    out.paste(bleed, (0, 0))
+    out.paste(im, (0, bleed_px))
+    return out
+
+def prepare_rectangular_card(
+    path: Path,
+    content_width_px: int,
+    content_height_px: int,
+    top_bleed_px: int,
+    trim: bool = True,
+    distortion: float = 0.02,
+) -> Image.Image:
+    """Prepare an 8x5 finished card on 8x6 cm print stock."""
+    im = Image.open(path).convert("RGB")
+
+    if trim:
+        im = _trim_uniform_border(im)
+
+    content = _extend_to_size(
+        im,
+        content_width_px,
+        content_height_px,
+        distortion,
+    )
+
+    return _add_top_bleed(
+        content,
+        top_bleed_px,
+        distortion,
+    )
 
 # --- page layout ------------------------------------------------------------
 def _draw_cut_marks(draw: ImageDraw.ImageDraw, page_w: int, page_h: int,
@@ -156,6 +344,129 @@ def render_pages(covers: list[Path], card_cm: float, cols: int,
         log(f"  page {len(pages)}: {len(chunk)} card(s)")
     return pages
 
+def _draw_rectangular_cut_marks(
+    draw: ImageDraw.ImageDraw,
+    page_w: int,
+    page_h: int,
+    ox: int,
+    oy: int,
+    card_w: int,
+    card_h: int,
+    cols: int,
+    rows: int,
+) -> None:
+    """Draw cut marks for the rectangular 8x6 cm print cards."""
+    mark = cm(MARK_LEN_CM)
+
+    for i in range(cols + 1):
+        x = ox + i * card_w
+        draw.line(
+            [(x, 0), (x, mark)],
+            fill=MARK_COLOR,
+            width=MARK_WIDTH,
+        )
+        draw.line(
+            [(x, page_h - mark), (x, page_h)],
+            fill=MARK_COLOR,
+            width=MARK_WIDTH,
+        )
+
+    for j in range(rows + 1):
+        y = oy + j * card_h
+        draw.line(
+            [(0, y), (mark, y)],
+            fill=MARK_COLOR,
+            width=MARK_WIDTH,
+        )
+        draw.line(
+            [(page_w - mark, y), (page_w, y)],
+            fill=MARK_COLOR,
+            width=MARK_WIDTH,
+        )
+
+
+def render_rectangular_pages(
+    covers: list[Path],
+    marks: bool,
+    trim: bool,
+    distortion: float = 0.02,
+    log=print,
+) -> list[Image.Image]:
+    """Render 8x5 cm finished cards onto 8x6 cm print stock."""
+    page_w = cm(A4_CM[0])
+    page_h = cm(A4_CM[1])
+
+    card_w = cm(RECTANGULAR_PRINT_WIDTH_CM)
+    card_h = cm(RECTANGULAR_PRINT_HEIGHT_CM)
+
+    content_w = cm(RECTANGULAR_CONTENT_WIDTH_CM)
+    content_h = cm(RECTANGULAR_CONTENT_HEIGHT_CM)
+    top_bleed = cm(RECTANGULAR_TOP_BLEED_CM)
+
+    cols = RECTANGULAR_COLS
+
+    # 4 rows x 2 columns = 8 cards on A4.
+    rows = max(
+        1,
+        (page_h - 2 * cm(PAGE_MARGIN_CM)) // card_h,
+    )
+    per_page = rows * cols
+
+    pages: list[Image.Image] = []
+
+    for start in range(0, len(covers), per_page):
+        chunk = covers[start:start + per_page]
+        rows_used = (len(chunk) + cols - 1) // cols
+
+        block_w = cols * card_w
+        block_h = rows_used * card_h
+
+        ox = (page_w - block_w) // 2
+        oy = (page_h - block_h) // 2
+
+        page = Image.new("RGB", (page_w, page_h), "white")
+
+        for idx, cover in enumerate(chunk):
+            r, c = divmod(idx, cols)
+
+            card = prepare_rectangular_card(
+                cover,
+                content_w,
+                content_h,
+                top_bleed,
+                trim=trim,
+                distortion=distortion,
+            )
+
+            expected = (card_w, card_h)
+            if card.size != expected:
+                raise RuntimeError(
+                    f"Unexpected rectangular card size {card.size}; "
+                    f"expected {expected}"
+                )
+
+            page.paste(
+                card,
+                (ox + c * card_w, oy + r * card_h),
+            )
+
+        if marks:
+            _draw_rectangular_cut_marks(
+                ImageDraw.Draw(page),
+                page_w,
+                page_h,
+                ox,
+                oy,
+                card_w,
+                card_h,
+                cols,
+                rows_used,
+            )
+
+        pages.append(page)
+        log(f"  page {len(pages)}: {len(chunk)} card(s)")
+
+    return pages
 
 def save_pdf(pages: list[Image.Image], out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -202,6 +513,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="Cards per row")
     parser.add_argument("--card-cm", type=float, default=DEFAULT_CARD_CM,
                         help="Card edge length in centimetres")
+    parser.add_argument(
+        "--rectangular",
+        action="store_true",
+        help="Print 8x5 cm finished cards on 8x6 cm stock",
+    )
+    parser.add_argument(
+        "--distortion",
+        type=float,
+        default=DEFAULT_DISTORTION,
+        help=f"Verzerrungsfaktor für Rectangular-Karten (default: {DEFAULT_DISTORTION})",
+    )
     parser.add_argument("--no-marks", action="store_true",
                         help="Do not draw cut-guide tick marks")
     parser.add_argument("--no-trim", action="store_true",
@@ -269,13 +591,40 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     kind = "cover(s)" if args.all else "new cover(s)"
-    print(f"{len(covers)} {kind} to lay out "
-          f"({args.cols} per row, {args.card_cm:g}x{args.card_cm:g} cm):")
+
+    if args.rectangular:
+        cols = RECTANGULAR_COLS
+        print(
+            f"{len(covers)} {kind} to lay out "
+            f"({cols} per row, "
+            f"{RECTANGULAR_PRINT_WIDTH_CM:g}x"
+            f"{RECTANGULAR_PRINT_HEIGHT_CM:g} cm print / "
+            f"{RECTANGULAR_CONTENT_WIDTH_CM:g}x"
+            f"{RECTANGULAR_CONTENT_HEIGHT_CM:g} cm finished):"
+        )
+    else:
+        cols = args.cols
+        print(
+            f"{len(covers)} {kind} to lay out "
+            f"({cols} per row, "
+            f"{args.card_cm:g}x{args.card_cm:g} cm):"
+        )
+
     for p in covers:
         print(f"  {rel_of(p)}")
 
     if args.dry_run:
-        _, per_page = page_grid(args.card_cm, args.cols)
+        if args.rectangular:
+            rows = max(
+                1,
+                (
+                    cm(A4_CM[1]) - 2 * cm(PAGE_MARGIN_CM)
+                ) // cm(RECTANGULAR_PRINT_HEIGHT_CM),
+            )
+            per_page = rows * RECTANGULAR_COLS
+        else:
+            _, per_page = page_grid(args.card_cm, args.cols)
+
         short = (-len(covers)) % per_page
         if short:
             print(f"\nNOTE: the last page would have {per_page - short}/{per_page} "
@@ -283,8 +632,21 @@ def main(argv: list[str] | None = None) -> int:
         print("\n(dry run — nothing written)")
         return 0
 
-    pages = render_pages(covers, args.card_cm, args.cols,
-                         marks=not args.no_marks, trim=not args.no_trim)
+    if args.rectangular:
+        pages = render_rectangular_pages(
+            covers,
+            marks=not args.no_marks,
+            trim=not args.no_trim,
+        )
+    else:
+        pages = render_pages(
+            covers,
+            args.card_cm,
+            args.cols,
+            marks=not args.no_marks,
+            trim=not args.no_trim,
+        )
+
     out = Path(args.out) if args.out else (
         espuino.PRINT_SHEETS_DIR / f"cards-{time.strftime('%Y%m%d-%H%M%S')}.pdf")
     save_pdf(pages, out)
@@ -292,7 +654,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # Full pages only laminate well, so flag a partial last page: say how many
     # more covers would fill it (download that many more, then re-run ./cards).
-    _, per_page = page_grid(args.card_cm, args.cols)
+    if args.rectangular:
+        rows = max(
+            1,
+            (
+                cm(A4_CM[1]) - 2 * cm(PAGE_MARGIN_CM)
+            ) // cm(RECTANGULAR_PRINT_HEIGHT_CM),
+        )
+        per_page = rows * RECTANGULAR_COLS
+    else:
+        _, per_page = page_grid(args.card_cm, args.cols)
+
     short = (-len(covers)) % per_page
     if short:
         print(f"NOTE: the last page has {per_page - short}/{per_page} cards. "

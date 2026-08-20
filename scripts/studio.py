@@ -157,12 +157,14 @@ def parse_env(path: Path) -> dict[str, str]:
 class Studio:
     def __init__(self, cfg: espuino.Config, token: str | None,
                  port: int = DEFAULT_PORT, cards_enabled: bool = True,
-                 agent_enabled: bool = True):
+                 agent_enabled: bool = True,
+                 rectangular_cards: float | None = None):
         self.cfg = cfg
         self.token = token
         self.port = port
         self.cards_enabled = cards_enabled  # --no-cards: hide print tab/column, 404 its API
         self.agent_enabled = agent_enabled  # --no-agent: hide agent tab, 404 its API
+        self.rectangular_cards = rectangular_cards
         self.loop: asyncio.AbstractEventLoop | None = None
         self.agent: studio_agent.SessionManager | None = None
 
@@ -863,8 +865,8 @@ class Studio:
             self.emit({"t": "state.changed"})
 
     def _render_sheet(self, rels: list[str]) -> dict:
-        """Render chosen covers to a fresh PDF and mark them printed -- identical
-        behaviour to ./cards (same defaults) so ./cards --undo reverts it."""
+        """Render selected covers either as the traditional PDF or as
+        individual rectangular JPGs."""
         covers_dir = espuino.DEFAULT_COVERS_DIR
         covers = [covers_dir / r for r in rels]
         missing = [p for p in covers if not p.exists()]
@@ -874,19 +876,91 @@ class Studio:
         def log(line: str) -> None:
             self.emit_threadsafe({"t": "cards.log", "line": line})
 
-        pages = cards.render_pages(covers, cards.DEFAULT_CARD_CM, cards.DEFAULT_COLS,
-                                   marks=True, trim=True, log=log)
+        # New rectangular path: one JPG per cover, no A4 page/PDF.
+        if self.rectangular_cards is not None:
+            out_files = []
+
+            for cover in covers:
+                card = cards.prepare_rectangular_card(
+                    cover,
+                    cards.cm(cards.RECTANGULAR_CONTENT_WIDTH_CM),
+                    cards.cm(cards.RECTANGULAR_CONTENT_HEIGHT_CM),
+                    cards.cm(cards.RECTANGULAR_TOP_BLEED_CM),
+                    trim=True,
+                    distortion=self.rectangular_cards,
+                )
+
+                distortion = f"{self.rectangular_cards:g}"
+                stem = cover.stem
+                name = (
+                    f"{stem}_"
+                    f"{cards.RECTANGULAR_PRINT_WIDTH_CM:g}x"
+                    f"{cards.RECTANGULAR_PRINT_HEIGHT_CM:g}_"
+                    f"({cards.RECTANGULAR_CONTENT_HEIGHT_CM:g}x"
+                    f"{cards.RECTANGULAR_CONTENT_WIDTH_CM:g})_"
+                    f"{distortion}.jpg"
+                )
+
+                out = espuino.PRINT_SHEETS_DIR / name
+                out.parent.mkdir(parents=True, exist_ok=True)
+                card.save(out, "JPEG", quality=95, dpi=(cards.DPI, cards.DPI))
+                out_files.append(out)
+
+                log(f"  {cover.name} -> {out.name}")
+
+            state = PrintState.load(cards.STATE_FILE)
+            items = [
+                (
+                    r,
+                    (covers_dir / r).stat().st_size,
+                    (covers_dir / r).stat().st_mtime,
+                )
+                for r in rels
+            ]
+
+            # Keep the existing print-state behaviour so the selected covers
+            # are marked as printed and ./cards --undo can revert them.
+            state.mark_run(
+                items,
+                str(out_files[-1]) if out_files else "",
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            state.save()
+
+            for out in out_files:
+                self._reveal_sheet(out)
+
+            return {
+                "out": str(out_files[-1]) if out_files else "",
+                "files": [str(p) for p in out_files],
+                "cards": len(rels),
+            }
+
+        # Existing PDF path -- leave the old behaviour unchanged.
+        pages = cards.render_pages(
+            covers,
+            cards.DEFAULT_CARD_CM,
+            cards.DEFAULT_COLS,
+            marks=True,
+            trim=True,
+            log=log,
+        )
         out = (espuino.PRINT_SHEETS_DIR
                / f"cards-{time.strftime('%Y%m%d-%H%M%S')}.pdf")
         cards.save_pdf(pages, out)
         state = PrintState.load(cards.STATE_FILE)
-        items = [(r, (covers_dir / r).stat().st_size, (covers_dir / r).stat().st_mtime)
-                 for r in rels]
+        items = [
+            (
+                r,
+                (covers_dir / r).stat().st_size,
+                (covers_dir / r).stat().st_mtime,
+            )
+            for r in rels
+        ]
         state.mark_run(items, str(out), time.strftime("%Y-%m-%d %H:%M:%S"))
         state.save()
         self._reveal_sheet(out)
         return {"out": str(out), "pages": len(pages), "cards": len(rels)}
-
     # -- targeted per-unit upload --
     #
     # STANDING RULE (do not relearn — see CLAUDE.md "Device traffic degrades
@@ -1340,6 +1414,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", help="ESPuino device host/IP override")
     parser.add_argument("--no-browser", action="store_true",
                         help="Do not open a browser tab on start")
+    parser.add_argument(
+        "--rectangular-cards",
+        nargs="?",
+        const=0.02,
+        type=float,
+        metavar="DISTORTION",
+        help="Use the rectangular-card print path; optionally specify distortion (default: 0.02).",
+    )
     parser.add_argument("--no-cards", action="store_true",
                         help="Hide the card-printing tab and column (feature disabled)")
     parser.add_argument("--no-agent", action="store_true",
@@ -1352,8 +1434,14 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("CLAUDE_CODE_OAUTH_TOKEN", token)
 
     cfg = espuino.Config.from_env(host=args.host)
-    studio = Studio(cfg, token, port=args.port, cards_enabled=not args.no_cards,
-                    agent_enabled=not args.no_agent)
+    studio = Studio(
+        cfg,
+        token,
+        port=args.port,
+        cards_enabled=not args.no_cards,
+        agent_enabled=not args.no_agent,
+        rectangular_cards=args.rectangular_cards,
+    )
     app = studio.build_app()
 
     url = f"http://127.0.0.1:{args.port}/"
