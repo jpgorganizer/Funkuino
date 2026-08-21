@@ -512,6 +512,20 @@ def collect_covers(root: Path) -> list[Path]:
                 found.append(Path(dirpath) / fn)
     return sorted(found)
 
+def distortion_arg(value: str) -> float:
+    try:
+        distortion = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "distortion must be a number between 0 and 1"
+        ) from exc
+
+    if not 0 <= distortion <= 1:
+        raise argparse.ArgumentTypeError(
+            "distortion must be between 0 and 1"
+        )
+
+    return distortion
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
@@ -543,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--distortion",
-        type=float,
+        type=distortion_arg,
         default=DEFAULT_DISTORTION,
         help=f"Verzerrungsfaktor für Rectangular-Karten (default: {DEFAULT_DISTORTION})",
     )
@@ -660,6 +674,7 @@ def main(argv: list[str] | None = None) -> int:
             covers,
             marks=not args.no_marks,
             trim=not args.no_trim,
+			distortion=args.distortion,
         )
     else:
         pages = render_pages(
