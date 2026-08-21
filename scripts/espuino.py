@@ -419,6 +419,11 @@ IGNORE_PATTERNS = (
     "*.gif",
     "*.bmp",
     "*.webp",
+    "*.marker",
+    "inhalt.txt",
+    "leo.*", 
+    "*.ppt",
+    "*.pdf"
 )
 
 Logger = Callable[[str], None]

@@ -203,7 +203,7 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
                 rel = mp3.relative_to(local_dir)
                 add("song", str(rel), "Lieder", mp3.stem, [mp3],
                     str(rel.with_suffix(".jpg")))
-        elif " - " in name or (entry / ".album").is_file():
+        elif " - " in name or (entry / ".album").is_file() or (entry / "album.marker").is_file():
             # A "<Artist> - <Album>" name, or any folder marked with a `.album`
             # file, is a single album card (its whole folder plays as one list).
             if " - " in name:
@@ -215,9 +215,15 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
             for child in sorted(entry.iterdir(), key=lambda p: p.name):
                 if espuino.is_ignored(child.name):
                     continue
+                
                 if child.is_dir():
-                    add("folge", f"{name}/{child.name}", name, child.name,
-                        _mp3s(child), f"{name}/{child.name}.jpg")
+                    if " - " in child.name or (child / ".album").is_file() or (child / "album.marker").is_file():
+                        add("album", f"{name}/{child.name}", name, child.name,
+                            _mp3s(child), f"{name}/{child.name}.jpg")
+                    else:
+                        add("folge", f"{name}/{child.name}", name, child.name,
+                            _mp3s(child), f"{name}/{child.name}.jpg")
+                
                 elif child.name.lower().endswith(".mp3"):
                     add("hoerspiel", f"{name}/{child.name}", name, child.stem,
                         [child], f"{name}/{child.stem}.jpg")
