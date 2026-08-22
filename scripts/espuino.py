@@ -234,8 +234,20 @@ def ffmpeg_hint() -> str:
 
 
 def find_ffmpeg() -> str | None:
-    """Path to the ffmpeg we would run, or None. The macOS bundle puts its own
-    build first on PATH, so this finds that one ahead of any Homebrew copy."""
+    """Path to ffmpeg we would run."""
+    candidates = []
+
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+        candidates.append(base / "_internal" / "ffmpeg" / "ffmpeg.exe")
+        candidates.append(base / "ffmpeg" / "ffmpeg.exe")
+
+    candidates.append(Path(__file__).resolve().parent.parent / "ffmpeg" / "ffmpeg.exe")
+
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+
     return shutil.which("ffmpeg")
 
 
