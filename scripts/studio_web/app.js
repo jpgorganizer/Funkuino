@@ -331,10 +331,15 @@ function isTabActive(name) {
 // refresh, and bounces the user off a tab if it was active when disabled.
 function applyFeatureVisibility() {
   const cardsOn = State.features.cards !== false;
+  const printTabOn = State.features.printTab !== false;
   const agentOn = State.features.agent !== false;
+
   const tabBtn = $$(".tab").find(b => b.dataset.tab === "karten");
-  if (tabBtn) tabBtn.hidden = !cardsOn;
-  if (!cardsOn && isTabActive("karten")) activateTab("bibliothek");
+  if (tabBtn) tabBtn.hidden = !(cardsOn && printTabOn);
+  if (!(cardsOn && printTabOn) && isTabActive("karten")) {
+    activateTab("bibliothek");
+  }
+
   const agentBtn = $$(".tab").find(b => b.dataset.tab === "agent");
   if (agentBtn) agentBtn.hidden = !agentOn;
   if (!agentOn && isTabActive("agent")) activateTab("bibliothek");

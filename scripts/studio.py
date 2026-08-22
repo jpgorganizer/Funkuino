@@ -157,12 +157,13 @@ def parse_env(path: Path) -> dict[str, str]:
 class Studio:
     def __init__(self, cfg: espuino.Config, token: str | None,
                  port: int = DEFAULT_PORT, cards_enabled: bool = True,
-                 agent_enabled: bool = True,
+                 agent_enabled: bool = True, print_tab_enabled: bool = True,
                  rectangular_cards: float | None = None):
         self.cfg = cfg
         self.token = token
         self.port = port
         self.cards_enabled = cards_enabled  # --no-cards: hide print tab/column, 404 its API
+        self.print_tab_enabled = print_tab_enabled
         self.agent_enabled = agent_enabled  # --no-agent: hide agent tab, 404 its API
         self.rectangular_cards = rectangular_cards
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -564,7 +565,7 @@ class Studio:
         # initial /api/state round-trip (device ping + library scan) is still
         # in flight.
         html = index.read_text(encoding="utf-8")
-        if not self.cards_enabled:
+        if not (self.print_tab_enabled and self.cards_enabled):
             html = html.replace(
                 '<button class="tab" data-tab="karten" role="tab">',
                 '<button class="tab" data-tab="karten" role="tab" hidden>')
@@ -645,7 +646,7 @@ class Studio:
             "rfid": {"listening": self.rfid_listening},
             "player": self._player,
             "tools": {"ffmpeg": self._ffmpeg_state()},
-            "features": {"cards": self.cards_enabled, "agent": self.agent_enabled},
+            "features": {"cards": self.cards_enabled, "agent": self.agent_enabled, "printTab": self.print_tab_enabled,},
         })
 
     def _ffmpeg_state(self) -> dict:
@@ -1425,6 +1426,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-cards", action="store_true",
                         help="Hide the card-printing tab and column (feature disabled)")
+    parser.add_argument("--no-print-tab", action="store_true",
+                        help="Hide the card-printing tab"),
     parser.add_argument("--no-agent", action="store_true",
                         help="Hide the agent tab (feature disabled)")
     args = parser.parse_args(argv)
@@ -1441,6 +1444,7 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         cards_enabled=not args.no_cards,
         agent_enabled=not args.no_agent,
+        print_tab_enabled=not args.no_print_tab,
         rectangular_cards=args.rectangular_cards,
     )
     app = studio.build_app()
