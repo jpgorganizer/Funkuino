@@ -42,3 +42,6 @@ build/
 
 # Headless screenshots (dev/shot.py output, regenerated on demand)
 dev/shots/
+
+#ffmpeg
+ffmpeg/
