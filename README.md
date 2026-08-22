@@ -1,3 +1,23 @@
+## Branches
+
+This fork contains the following branches and their respective changes:
+
+- **`main`** – Main development branch of this fork. It includes the changes from the branches listed below.
+- **`rectangular-card-format`** – Adds support for rectangular RFID card formats, including configurable distortion and related card-rendering changes.
+- **`pyinstaller`** – Adds and documents PyInstaller-based packaging of Funkuino Studio, including support for bundling a local `ffmpeg` executable.
+- **`feat-hide-cards-agent-tabs`** – Adds command-line options to hide the Cards and Agent features/tabs when they are not needed.
+- **`feat-show-tracks-in-album_folge`** – Adds the corresponding library display/sorting changes for tracks in album/episode views.
+- **`feat-library-sort-mode`** – Adds an alternative alphabetical (German phonebook) library sorting mode.
+- **`fix-remote-root-paths`** – Fixes handling of remote paths when a non-default `ESPUINO_REMOTE_ROOT` is configured.
+- **`fix-windows-directory-fsync`** – Adds Windows compatibility fixes for directory `fsync` and remote path separators.
+- **`UTF-8-Fix`** – Contains UTF-8 related fixes.
+- **`upstream/main`** – Reference branch for the original upstream repository.
+
+The `main` branch of this fork intentionally contains changes that are not part of the original upstream repository. This fork is maintained independently and no further pull requests to the upstream repository are planned.
+
+---
+
+
 # Funkuino
 
 **Manage an [ESPuino](https://espuino.de) kids' audio player from your Mac —
