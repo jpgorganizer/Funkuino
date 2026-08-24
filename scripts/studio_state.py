@@ -49,8 +49,20 @@ def _nfc(text: str) -> str:
 
 
 # Smart default RFID playMode per unit kind (firmware codes; see spec):
-# 1 SINGLE_TRACK, 3 AUDIOBOOK, 5 ALL_TRACKS_OF_DIR_SORTED.
-DEFAULT_PLAYMODE = {"song": 1, "hoerspiel": 3, "album": 5, "folge": 5, "other": 3}
+# 1 SINGLE_TRACK, 3 AUDIOBOOK, 5 ALL_TRACKS_OF_DIR_SORTED, 11 LOCAL_M3U.
+DEFAULT_PLAYMODE = {"song": 1, "hoerspiel": 3, "album": 5, "folge": 5, "other": 3,
+                    "stream": 11}
+
+# Top-level library folder dedicated to standalone .m3u/.m3u8 playlists and
+# webstreams (e.g. a single internet-radio URL in its own .m3u). Recognised
+# recursively at any depth; see scan()'s docstring for the full picture of
+# where else .m3u/.m3u8 is (and importantly isn't) recognised.
+STREAM_ROOT_DIR = "Webstreams_Playlisten"
+
+# .m3u is the original (often ASCII/Latin-1) playlist format; .m3u8 is the
+# same format explicitly UTF-8-encoded. ESPuino's firmware plays both the same
+# way (LOCAL_M3U), so Funkuino treats them identically throughout.
+STREAM_EXTS = (".m3u", ".m3u8")
 
 
 def assignment_key(file_or_url: str, remote_root: str = espuino.DEFAULT_REMOTE_ROOT) -> str:
@@ -81,15 +93,27 @@ def build_card_map(assignments: list[dict],
     return out
 
 
-def _mp3s(root: Path) -> list[Path]:
-    """All (non-ignored) .mp3 files under ``root``, sorted by path."""
+def _files_with_ext(root: Path, exts: tuple[str, ...]) -> list[Path]:
+    """All (non-ignored) files under ``root`` whose lowercased name ends with
+    one of ``exts``, sorted by path. Shared recursive walk behind _mp3s() and
+    the .m3u/.m3u8 lookup, so both stay consistent (ignore rules, sort order)."""
     out: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if not espuino.is_ignored(d))
         for fn in sorted(filenames):
-            if fn.lower().endswith(".mp3") and not espuino.is_ignored(fn):
+            if fn.lower().endswith(exts) and not espuino.is_ignored(fn):
                 out.append(Path(dirpath) / fn)
     return out
+
+
+def _mp3s(root: Path) -> list[Path]:
+    """All (non-ignored) .mp3 files under ``root``, sorted by path."""
+    return _files_with_ext(root, (".mp3",))
+
+
+def _streams(root: Path) -> list[Path]:
+    """All (non-ignored) .m3u/.m3u8 files under ``root``, sorted by path."""
+    return _files_with_ext(root, STREAM_EXTS)
 
 
 def _sync_status(files: list[Path], local_dir: Path, remote_root: str,
@@ -153,6 +177,13 @@ def _make_unit(kind: str, unit_id: str, series: str, title: str,
     }
 
 
+def _is_album_dir(d: Path) -> bool:
+    """A "<Artist> - <Album>" name, or any folder marked with a `.album` or
+    `album.marker` file, is a single album card (its whole folder plays as
+    one sorted list)."""
+    return " - " in d.name or (d / ".album").is_file() or (d / "album.marker").is_file()
+
+
 def scan(cfg: espuino.Config, sync_state: SyncState | None,
          print_state: PrintState,
          covers_dir: Path = espuino.DEFAULT_COVERS_DIR,
@@ -160,13 +191,25 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
     """Walk ``files/`` and return the flat list of card units (see module docstring).
 
     Derivation of a top-level entry:
-    * ``Lieder`` dir  → each mp3 inside is a ``song`` unit.
-    * dir with `` - `` in its name → the whole dir is one ``album`` unit.
-    * any other dir → a *series*: each child subdir is a ``folge`` unit, each
-      child mp3 a ``hoerspiel`` unit.
-    * a loose top-level mp3 → an ``other`` unit.
-    Cover path mirrors the unit's relative path with a ``.jpg`` suffix (an album's
-    single folder cover lives at ``<dirname>.jpg``).
+    * ``Lieder`` dir  -> each mp3 inside is a ``song`` unit; each .m3u/.m3u8
+      inside is a ``stream`` unit (grouped under "Lieder" either way).
+    * ``Webstreams_Playlisten`` dir -> each .m3u/.m3u8 anywhere inside (any
+      depth) is its own ``stream`` unit, grouped by its immediate parent
+      folder's name (so a category subfolder becomes a group heading; a file
+      sitting directly in the root groups under "Webstreams_Playlisten" itself).
+    * dir with `` - `` in its name (or a `.album`/`album.marker` marker file)
+      -> the whole dir is one ``album`` unit.
+    * any other dir -> a *series*: each child subdir is either a nested
+      ``album`` (same "<Artist> - <Album>"/marker rule) or a ``folge`` unit;
+      each child mp3 is a ``hoerspiel`` unit; each child .m3u/.m3u8 is a
+      ``stream`` unit -- but only at this level: a .m3u/.m3u8 *inside* a
+      ``folge`` or nested ``album`` subfolder is not recognised, matching how
+      those subfolders already bundle their mp3s into one unit rather than
+      exposing individual files.
+    * a loose top-level file -> an ``other`` unit (.mp3) or a ``stream`` unit
+      (.m3u/.m3u8).
+    Cover path mirrors the unit's relative path with a ``.jpg`` suffix (an
+    album's/folge's single folder cover lives at ``<dirname>.jpg``).
     """
     local_dir = Path(cfg.local_dir)
     covers_dir = Path(covers_dir)
@@ -193,8 +236,10 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
 
         if entry.is_file():
             if name.lower().endswith(".mp3"):
-                stem = entry.stem
-                add("other", name, "", stem, [entry],
+                add("other", name, "", entry.stem, [entry],
+                    str(Path(name).with_suffix(".jpg")))
+            elif name.lower().endswith(STREAM_EXTS):
+                add("stream", name, "", entry.stem, [entry],
                     str(Path(name).with_suffix(".jpg")))
             continue
 
@@ -203,29 +248,47 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
                 rel = mp3.relative_to(local_dir)
                 add("song", str(rel), "Lieder", mp3.stem, [mp3],
                     str(rel.with_suffix(".jpg")))
-        elif " - " in name or (entry / ".album").is_file() or (entry / "album.marker").is_file():
-            # A "<Artist> - <Album>" name, or any folder marked with a `.album`
-            # file, is a single album card (its whole folder plays as one list).
+            for m3u in _streams(entry):
+                rel = m3u.relative_to(local_dir)
+                add("stream", str(rel), "Lieder", m3u.stem, [m3u],
+                    str(rel.with_suffix(".jpg")))
+
+        elif name == STREAM_ROOT_DIR:
+            for m3u in _streams(entry):
+                rel = m3u.relative_to(local_dir)
+                # Group by the immediate parent folder, however deep -- a file
+                # sitting directly in the root has no such parent, so it falls
+                # back to the root folder's own name as the group heading.
+                group = m3u.parent.name if m3u.parent != entry else STREAM_ROOT_DIR
+                add("stream", str(rel), group, m3u.stem, [m3u],
+                    str(rel.with_suffix(".jpg")))
+
+        elif _is_album_dir(entry):
             if " - " in name:
                 artist, _, album = name.partition(" - ")
             else:
                 artist, album = name, name
             add("album", name, artist, album, _mp3s(entry), f"{name}.jpg")
+
         else:  # a series folder
             for child in sorted(entry.iterdir(), key=lambda p: p.name):
                 if espuino.is_ignored(child.name):
                     continue
-                
+
                 if child.is_dir():
-                    if " - " in child.name or (child / ".album").is_file() or (child / "album.marker").is_file():
+                    if _is_album_dir(child):
                         add("album", f"{name}/{child.name}", name, child.name,
                             _mp3s(child), f"{name}/{child.name}.jpg")
                     else:
                         add("folge", f"{name}/{child.name}", name, child.name,
                             _mp3s(child), f"{name}/{child.name}.jpg")
-                
+
                 elif child.name.lower().endswith(".mp3"):
                     add("hoerspiel", f"{name}/{child.name}", name, child.stem,
+                        [child], f"{name}/{child.stem}.jpg")
+
+                elif child.name.lower().endswith(STREAM_EXTS):
+                    add("stream", f"{name}/{child.name}", name, child.stem,
                         [child], f"{name}/{child.stem}.jpg")
 
     units.sort(key=lambda u: u["mtime"], reverse=True)

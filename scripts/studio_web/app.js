@@ -382,7 +382,7 @@ function appendLog(id, line, isErr) {
 /* =============================== 5. Bibliothek =============================== */
 
 /** @type {Record<string, string>} */
-const KIND_LABEL = { song: "Lied", album: "Album", folge: "Folge", hoerspiel: "Hörspiel", other: "Sonstiges" };
+const KIND_LABEL = { song: "Lied", album: "Album", folge: "Folge", hoerspiel: "Hörspiel", other: "Sonstiges", stream: "Stream" };
 // German phonebook order (DIN 5007-2): ä/ö/ü sort as "ae"/"oe"/"ue", not as
 // plain a/o/u (that would be dictionary order, DIN 5007-1). `numeric: true`
 // additionally makes "Folge 2" sort before "Folge 10".
