@@ -1682,13 +1682,20 @@ const RFID = {
 };
 const FILE_KINDS = new Set(["song", "hoerspiel", "other"]);   // single-file units
 /** @type {Record<string, number>} */
-const DEFAULT_MODE = { song: 1, hoerspiel: 3, album: 5, folge: 5, other: 3 };
+const DEFAULT_MODE = { song: 1, hoerspiel: 3, album: 5, folge: 5, other: 3, stream: 11 };
 const MODE_OPTS = {
   file:   [[1, "Einzeltitel"], [2, "Einzeltitel-Schleife"], [3, "Hörbuch (merkt Position)"]],
   folder: [[5, "Ordner, sortiert"], [6, "Ordner, zufällig"], [7, "Ordner, sortiert (Schleife)"]],
+  // A .m3u/.m3u8 unit is neither a single file nor a folder -- it's always a
+  // list read from the file itself, so none of the above modes apply. 11 is
+  // the only sensible option (ESPuino firmware: LOCAL_M3U).
+  stream: [[11, "Playlist/Webstream (M3U)"]],
 };
 /** @param {string} kind */
-function modeOptionsFor(kind) { return FILE_KINDS.has(kind) ? MODE_OPTS.file : MODE_OPTS.folder; }
+function modeOptionsFor(kind) {
+  if (kind === "stream") return MODE_OPTS.stream;
+  return FILE_KINDS.has(kind) ? MODE_OPTS.file : MODE_OPTS.folder;
+}
 
 function invalidateAssignments() { RFID.assignments = null; }
 function fetchAssignments() {

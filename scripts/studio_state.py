@@ -246,12 +246,12 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
         if name == "Lieder":
             for mp3 in _mp3s(entry):
                 rel = mp3.relative_to(local_dir)
-                add("song", str(rel), "Lieder", mp3.stem, [mp3],
-                    str(rel.with_suffix(".jpg")))
+                add("song", rel.as_posix(), "Lieder", mp3.stem, [mp3],
+                    rel.with_suffix(".jpg").as_posix())
             for m3u in _streams(entry):
                 rel = m3u.relative_to(local_dir)
-                add("stream", str(rel), "Lieder", m3u.stem, [m3u],
-                    str(rel.with_suffix(".jpg")))
+                add("stream", rel.as_posix(), "Lieder", m3u.stem, [m3u],
+                    rel.with_suffix(".jpg").as_posix())
 
         elif name == STREAM_ROOT_DIR:
             for m3u in _streams(entry):
@@ -260,8 +260,8 @@ def scan(cfg: espuino.Config, sync_state: SyncState | None,
                 # sitting directly in the root has no such parent, so it falls
                 # back to the root folder's own name as the group heading.
                 group = m3u.parent.name if m3u.parent != entry else STREAM_ROOT_DIR
-                add("stream", str(rel), group, m3u.stem, [m3u],
-                    str(rel.with_suffix(".jpg")))
+                add("stream", rel.as_posix(), group, m3u.stem, [m3u],
+                    rel.with_suffix(".jpg").as_posix())
 
         elif _is_album_dir(entry):
             if " - " in name:
