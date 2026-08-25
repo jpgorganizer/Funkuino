@@ -758,16 +758,42 @@ function handlePlayerEvent(m) {
 }
 
 // Header chip: only when playing an unmatched track (no row indicator to show it).
+// Container kinds bundle several sub-items into one card (a whole album, a
+// hoerspiel "Folge" with several chapter files, a .m3u/.m3u8 playlist) --
+// the device only ever reports the currently playing SUB-item, never the
+// container itself, so the chip combines both. Leaf kinds (song, hoerspiel,
+// other) are a single file: the unit's own title already IS what's playing,
+// so showing it alone avoids a "Sommerlied – Sommerlied"-style duplicate.
+const CONTAINER_KINDS = new Set(["album", "folge", "stream"]);
+
+// The device sometimes reports a raw file path (briefly, before ID3 tags
+// load) instead of a clean title. If it looks like a path -- contains "/" --
+// take just the filename, without extension, so a path never flashes up
+// where a title is expected.
+/** @param {string} raw */
+function cleanSubItemName(raw) {
+  const stripped = (raw || "").replace(/^\(\d+\/\d+\):\s*/, "").trim();
+  if (!stripped) return "";
+  if (stripped.includes("/")) {
+    const base = stripped.split("/").pop() || stripped;
+    return base.replace(/\.[^./]+$/, "");
+  }
+  return stripped;
+}
+
 function renderNowPlaying() {
   const chip = $("#now-playing");
   if (!chip) return;
   const p = State.player;
   const active = !!(p && (p.playing || p.pausePlay));   // playing or paused
-  const show = active && !p.unitId;                     // only when no row can show it
-  chip.hidden = !show;
-  if (!show) { chip.replaceChildren(); return; }
+  chip.hidden = !active;
+  if (!active) { chip.replaceChildren(); return; }
   chip.classList.toggle("paused", !!p.pausePlay);
-  const name = (p.name || "").replace(/^\(\d+\/\d+\):\s*/, "") || "unbekannt";   // drop "(N/M): " prefix
+  const subItem = cleanSubItemName(p.name) || "unbekannt";
+  const unit = p.unitId ? unitById(p.unitId) : null;
+  const name = unit
+    ? (CONTAINER_KINDS.has(unit.kind) ? `${unit.title} – ${subItem}` : (unit.title || unit.id))
+    : subItem;
   chip.replaceChildren(
     el("span", { class: "np-glyph", text: p.pausePlay ? "⏸" : "▶" }),
     el("span", { class: "np-name", text: (p.pausePlay ? "pausiert: " : "spielt: ") + name }),

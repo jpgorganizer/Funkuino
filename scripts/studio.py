@@ -205,6 +205,10 @@ class Studio:
         # listener's ws so player controls reuse it instead of a 2nd connection.
         self._player = {"playing": False, "unitId": None, "name": "", "pausePlay": False}
         self._player_last_unit: str | None = None
+        # A playMode change means a genuinely new playback session started
+        # (new card tap or web-triggered play) -- see _handle_trackinfo for
+        # why this matters for webstream/.m3u playback specifically.
+        self._player_last_playmode: int | None = None
         self._device_ws: aiohttp.ClientWebSocketResponse | None = None
         self._ws_send_lock = asyncio.Lock()
 
@@ -371,18 +375,36 @@ class Studio:
         if play_mode in (None, PLAYER_NO_PLAYLIST) or not num:
             self._reset_player()
             return
+        # A playMode change means a new playback session started (new card
+        # tap, or a web-triggered play of something else) -- the old sticky
+        # unit no longer applies. This matters most for webstream/.m3u
+        # playback (playMode 11): unlike normal mp3 playback, the firmware
+        # never sends a resolvable file path for it, not even briefly at
+        # track start -- every trackinfo message is ICY-style stream
+        # metadata (e.g. the station name, then the current show title).
+        # Without this reset, the sticky value from whatever mp3 played
+        # previously would be shown as "still playing" indefinitely, which
+        # is actively wrong rather than merely unresolved.
+        #print(f"DEBUG mode: play_mode={play_mode} last_playmode={self._player_last_playmode} "  # TEMP
+        #      f"last_unit={self._player_last_unit!r}")  # TEMP
+        if play_mode != self._player_last_playmode:
+            self._player_last_unit = None
+            self._player_last_playmode = play_mode
         name = str(ti.get("name") or "")
         pause = bool(ti.get("pausePlay"))
         uid = self._resolve_playing_unit(name)
+        #print(f"DEBUG resolve: name={name!r} resolved_uid={uid!r}")  # TEMP
         if uid is not None:
             self._player_last_unit = uid
         else:
             uid = self._player_last_unit            # sticky across ID3/path swaps
+        #print(f"DEBUG final: uid_used={uid!r}")  # TEMP
         self._update_player({"playing": not pause, "unitId": uid,
                              "name": name, "pausePlay": pause})
 
     def _reset_player(self) -> None:
         self._player_last_unit = None
+        self._player_last_playmode = None
         self._update_player({"playing": False, "unitId": None,
                              "name": "", "pausePlay": False})
 
