@@ -21,9 +21,9 @@ The `main` branch of this fork intentionally contains changes that are not part 
 
 # Funkuino
 
-**Manage an [ESPuino](https://espuino.de) kids' audio player from your Mac —
-library mirroring, printable RFID cards, and a web dashboard with an embedded
-Claude agent.**
+**Manage an [ESPuino](https://espuino.de) kids' audio player from your
+computer — library mirroring, printable RFID cards, and a web dashboard with
+an embedded Claude agent.**
 
 The [ESPuino](https://forum.espuino.de) is a wonderful DIY, RFID-controlled
 audio player for children: put a card on the box, the story plays. What it
@@ -31,6 +31,12 @@ doesn't come with is comfortable tooling for the grown-up side of the workflow �
 getting audio onto the device, keeping a library organised, and producing the
 physical cards. Funkuino is that missing half: a Mac app you can double-click,
 and the same tools as small, sharp command-line programs underneath.
+
+> **This fork adds first-class native Windows support** — no WSL required.
+> Everything below (Studio, sync, cards, the library conventions) works the
+> same way on Windows as on macOS/Linux; see [Windows](#windows) under
+> Install for setup, including a packaged, double-click `.exe` for people you
+> don't want to hand a terminal to.
 
 **[Download Funkuino for macOS](https://github.com/sadilek/Funkuino/releases/latest)**
 — a signed, notarised app for Apple Silicon (macOS 14+). It brings its own
@@ -152,7 +158,7 @@ Python runtime and a purpose-built ffmpeg.
   On Linux, install it with pipx instead (below); there the same Studio runs in
   your browser.
 
-### Linux (and Windows via WSL)
+### Linux
 
 There is no app bundle outside macOS, but Studio and every command are plain
 Python and run anywhere:
@@ -174,9 +180,109 @@ follows the platform: `$XDG_CONFIG_HOME/funkuino` on Linux,
 Two things differ from macOS: the spoken intro in front of merged audiobooks
 uses macOS' `say` and is skipped elsewhere (the merge itself runs normally), and
 a finished print sheet is not opened for you — it is written to
-`print-sheets/`. Windows currently needs WSL, since the `./sync`-style wrappers
-are shell scripts; the `funkuino …` commands themselves do not depend on a
-shell.
+`print-sheets/`.
+
+### Windows
+
+Native Windows works well — no WSL needed. Two ways to run it, pick based on
+who's using it:
+
+- **You, or anyone who's fine with a terminal:** the `pipx` route below. One
+  command to update (`git pull` if running from a checkout), full access to
+  every flag and command.
+- **Someone you're handing a finished setup to** (family, a co-parent, a
+  friend's kid's ESPuino) **and don't want anywhere near a terminal or a
+  Python install:** the packaged `.exe` further down. Self-contained, but a
+  manual rebuild is needed whenever the code changes — there's no
+  auto-update.
+
+#### Quick start (pipx)
+
+```powershell
+# Python 3.10+ from python.org, "Add python.exe to PATH" checked during setup, then:
+python -m pip install --user pipx
+python -m pipx ensurepath
+# close and reopen PowerShell so the updated PATH takes effect, then:
+pipx install funkuino
+winget install Gyan.FFmpeg     # or download a static build and put ffmpeg.exe on PATH
+
+funkuino studio                # dashboard at http://127.0.0.1:8800
+```
+
+Configuration is environment variables, same names as everywhere else
+(`ESPUINO_HOST`, `ESPUINO_LOCAL_DIR`, `ESPUINO_REMOTE_ROOT`,
+`FUNKUINO_DATA_DIR`) — set with `$env:NAME = "value"` for the current
+PowerShell window only, or `setx NAME "value"` to persist across window/reboot
+(a new window is needed to see a `setx` change — it does not apply
+retroactively to the one you ran it in).
+
+Working from a git checkout instead of `pipx install` (to track a fork, or to
+build from source) works the same as on Linux/macOS:
+
+```powershell
+git clone https://github.com/<you>/Funkuino.git
+cd Funkuino
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python scripts\studio.py
+```
+
+`pipx install --editable <path-to-checkout>` also works, and keeps the
+`funkuino` command in sync with the checkout without a separate install step
+per change.
+
+#### Packaged `.exe`, for people you don't want to hand a terminal to
+
+A `FunkuinoStudio.spec` ([PyInstaller](https://pyinstaller.org/)) bundles
+Studio, its Python dependencies and a local `ffmpeg.exe` into one folder — the
+person you give it to double-clicks an icon, never sees Python or a terminal
+prompt (well — one console window still opens alongside, showing Studio's own
+startup line and log output; that's expected, not a bug). This builds from a
+git checkout, in its own `.venv` (create one now if you haven't already):
+
+```powershell
+git clone https://github.com/<you>/Funkuino.git
+cd <repo-root>
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install pyinstaller
+# Download a static Windows ffmpeg build (e.g. from https://www.gyan.dev/ffmpeg/builds/)
+# and place the extracted ffmpeg.exe at:  <repo-root>\ffmpeg\ffmpeg.exe
+
+.venv\Scripts\python.exe -m PyInstaller --clean --onedir --name FunkuinoStudio `
+    --collect-all aiohttp --paths scripts `
+    --add-data "scripts\studio_web;studio_web" `
+    --add-binary "ffmpeg\ffmpeg.exe;ffmpeg" `
+    scripts\studio.py
+```
+
+That first run writes out `FunkuinoStudio.spec` with all of the above baked
+in; every rebuild after that is just `.venv\Scripts\python.exe -m PyInstaller
+FunkuinoStudio.spec` (or edit the `.spec` directly for further changes,
+rather than retyping the full command).
+
+The output is `dist\FunkuinoStudio\` — a **folder**, not a single portable
+`.exe` (PyInstaller's `--onedir` mode: `FunkuinoStudio.exe` plus the DLLs,
+`studio_web` assets and `ffmpeg.exe` it depends on all sit alongside it). Zip
+the whole folder to hand it over; don't copy just the `.exe` out on its own.
+
+Since the recipient's copy has no way to set environment variables
+themselves, bake their configuration into a small launcher instead of asking
+them to: a `.bat` file, dropped next to (or inside) the distributed folder,
+that sets their values and starts the bundled exe —
+
+```bat
+@echo off
+set ESPUINO_HOST=192.168.1.29
+set ESPUINO_LOCAL_DIR=M:\Kids\audiofiles
+set ESPUINO_REMOTE_ROOT=mp3
+set FUNKUINO_DATA_DIR=M:\Kids
+FunkuinoStudio\FunkuinoStudio.exe --no-cards --no-agent
+```
+
+— then turn that `.bat` into a desktop shortcut (right-click → *Create
+shortcut*, rename, optionally give it a nicer icon). That shortcut is the only
+thing they ever need to click.
 
 ### From source
 
