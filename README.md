@@ -8,6 +8,7 @@ This fork contains the following branches and their respective changes:
 - **`feat-hide-cards-agent-tabs`** – Adds command-line options to hide the Cards and Agent features/tabs when they are not needed.
 - **`feat-show-tracks-in-album_folge`** – Adds the corresponding library display/sorting changes for tracks in album/episode views.
 - **`feat-library-sort-mode`** – Adds an alternative alphabetical (German phonebook) library sorting mode.
+- **`feat-m3u-webstream-support`** – Recognises `.m3u`/`.m3u8` files as their own card units (a dedicated `Webstreams_Playlisten` folder, plus loose playlists in `Lieder/` and series folders), fixes a Windows path-separator bug affecting nested unit ids, and makes the "now playing" indicator always visible with a combined container/sub-item title.
 - **`fix-remote-root-paths`** – Fixes handling of remote paths when a non-default `ESPUINO_REMOTE_ROOT` is configured.
 - **`fix-windows-directory-fsync`** – Adds Windows compatibility fixes for directory `fsync` and remote path separators.
 - **`UTF-8-Fix`** – Contains UTF-8 related fixes.
@@ -50,6 +51,15 @@ print bar, assign RFID cards straight from the library view.
   hears every card placement. Put an unknown card on the box, click the row it
   should belong to — assigned (with sensible play-mode defaults per content
   type).
+- **Always-visible now playing:** a header chip shows what's playing
+  regardless of search/filter state — container units (an album, a
+  multi-story episode folder, a webstream playlist) combine the container's
+  own title with the currently playing sub-item (e.g. "Anne Kaffeekanne –
+  Trarira"); single-file units just show their own title.
+- **Toggleable panes:** `--no-cards` hides the card-printing tab and column,
+  `--no-agent` hides the agent tab — for setups that only use sync and the
+  library view, both features (and their API endpoints) disappear entirely
+  rather than sitting there unused.
 - **Integrated card printing** with the same manifest and `--undo` semantics as
   the command line — every cover as a thumbnail (newest first, printed ones
   greyed out), hand-pick covers onto a sheet or one-click the oldest full page:
@@ -93,7 +103,12 @@ app puts them on your PATH as `funkuino <command>`.
   edge-to-edge 6×6 cm squares on A4 PDFs (12 per page) with cut tick marks in
   the margins. Print, stick an RFID tag on each card's back, laminate, cut. A
   print manifest makes a bare `funkuino cards` mean "everything new since last
-  time", with stackable `--undo`.
+  time", with stackable `--undo`. `--rectangular-cards` switches to a
+  wallet/checkout-card-shaped format instead of the square default, for print
+  services whose own stock size doesn't match a plain square — the source
+  image is bleed-extended by mirroring/stretching its edges (rather than
+  leaving a hard white border) so a slightly-off manual trim never exposes
+  blank paper.
 
 ## Extensions — your own commands and your own agent
 
@@ -200,8 +215,22 @@ database:
 | Album | `files/<Artist> - <Album>/<NN> <Title>.mp3` |
 | Audiobook episode | `files/<Series>/<NNN> - <Title>.mp3` (one merged file) |
 | Multi-story episode | `files/<Series>/Folge <N>/<NN> <Story>.mp3` (folder = card, stories navigable with prev/next) |
+| Webstream / playlist | `files/Webstreams_Playlisten/<...>/<name>.m3u[8]` (any depth, grouped by immediate parent folder), or a loose `.m3u`/`.m3u8` in `Lieder/` or directly in a series folder |
 
 Cover images mirror the same paths under `card-covers/` (one image per card).
+
+A `.m3u`/`.m3u8` file is played via the ESPuino firmware's own `LOCAL_M3U`
+play mode (one line per entry, no folder references) and can mix webstream
+URLs with paths to files already on the SD card — mixing has worked since
+July 2021, per the feature's own [announcement
+thread](https://forum.espuino.de/t/neues-feature-playlist-aus-lokaler-m3u-datei/551).
+A local-file line is an *absolute* SD path (`/mp3/Lieder/Sommerlied.mp3`, not a
+bare filename or a folder); avoid umlauts in those paths, since the firmware
+author's own caveat is that the file's character encoding when uploaded isn't
+guaranteed. A single-entry `.m3u` pointing at one webstream URL works exactly
+like ESPuino's regular "webradio" entries — Funkuino doesn't need to
+distinguish "one station" from "a podcast feed with twenty episodes", both are
+just a `.m3u` file of a different length.
 
 A library folder holds `files/`, `card-covers/`, `print-sheets/` and a visible
 `status/` with the sync and print manifests — nothing hidden, so moving the
