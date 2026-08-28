@@ -432,10 +432,6 @@ IGNORE_PATTERNS = (
     "*.bmp",
     "*.webp",
     "*.marker",
-    "inhalt.txt",
-    "leo.*", 
-    "*.ppt",
-    "*.pdf"
 )
 
 Logger = Callable[[str], None]
@@ -496,8 +492,37 @@ class Config:
 
 
 # --- Helpers ----------------------------------------------------------------
+# Extra ignore patterns from a plain-text file at the library root, additive to
+# IGNORE_PATTERNS above -- for exclusions that are a personal/local choice
+# rather than something every Funkuino install needs (e.g. a particular
+# scanner's stray "inhalt.txt", or file types nobody but you keeps in the
+# library). One glob pattern per line (same fnmatch syntax as IGNORE_PATTERNS,
+# matched against a bare file/dir name, not a path); blank lines and lines
+# starting with "#" are ignored. Read once at import time -- restart Funkuino
+# after editing it. Missing file is not an error: an empty tuple just means
+# "no extra patterns", the common case.
+IGNORE_FILE = DATA_ROOT / "ignore.txt"
+
+
+def _load_ignore_file(path: Path) -> tuple[str, ...]:
+    print(f"ignore file: path={path!r}")  # TEMP
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        #print(f"DEBUG _load_ignore_file: lines={lines!r}")  # TEMP
+    except OSError:
+        return ()
+    return tuple(
+        stripped for line in lines
+        if (stripped := line.strip()) and not stripped.startswith("#")
+    )
+
+
+EXTRA_IGNORE_PATTERNS = _load_ignore_file(IGNORE_FILE)
+ALL_IGNORE_PATTERNS = IGNORE_PATTERNS + EXTRA_IGNORE_PATTERNS
+
+
 def is_ignored(name: str) -> bool:
-    return any(fnmatch.fnmatch(name, pat) for pat in IGNORE_PATTERNS)
+    return any(fnmatch.fnmatch(name, pat) for pat in ALL_IGNORE_PATTERNS)
 
 
 def cover_path_for(media_path: str | Path, lib_dir: str | Path,
