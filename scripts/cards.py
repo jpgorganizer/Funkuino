@@ -130,12 +130,9 @@ def _stretch_edge(
 ) -> Image.Image:
     """Extend an image edge outward without mirroring.
 
-    A small strip at the selected edge is used as the source. The strip is
-    stretched only in the outward direction. The inner edge stays fixed,
-    so image features continue naturally into the bleed area.
-
-    ``distortion`` determines how much of the source image is sampled.
+    A small strip from the selected edge is stretched into the bleed area.
     """
+
     if amount <= 0:
         return Image.new("RGB", (1, 1))
 
@@ -146,33 +143,20 @@ def _stretch_edge(
         strip_w = max(1, min(w, round(w * fraction)))
 
         if side == "left":
-            # Source strip immediately next to the left edge.
             strip = im.crop((0, 0, strip_w, h))
 
-            # Output is wider by ``amount``. The right edge of the source
-            # corresponds to the inner edge of the bleed; the left edge
-            # is pulled outward.
-            out_w = amount + strip_w
-            stretched = strip.transform(
-                (out_w, h),
-                Image.Transform.AFFINE,
-                (strip_w / out_w, 0, 0, 0, 1, 0),
-                resample=Image.Resampling.BICUBIC,
+            return strip.resize(
+                (amount, h),
+                Image.Resampling.BICUBIC,
             )
-            return stretched.crop((0, 0, amount, h))
 
-        else:
-            # Source strip immediately next to the right edge.
+        if side == "right":
             strip = im.crop((w - strip_w, 0, w, h))
 
-            out_w = amount + strip_w
-            stretched = strip.transform(
-                (out_w, h),
-                Image.Transform.AFFINE,
-                (strip_w / out_w, 0, 0, 0, 1, 0),
-                resample=Image.Resampling.BICUBIC,
+            return strip.resize(
+                (amount, h),
+                Image.Resampling.BICUBIC,
             )
-            return stretched.crop((strip_w, 0, out_w, h))
 
     if side in ("top", "bottom"):
         strip_h = max(1, min(h, round(h * fraction)))
@@ -180,26 +164,18 @@ def _stretch_edge(
         if side == "top":
             strip = im.crop((0, 0, w, strip_h))
 
-            out_h = amount + strip_h
-            stretched = strip.transform(
-                (w, out_h),
-                Image.Transform.AFFINE,
-                (1, 0, 0, 0, strip_h / out_h, 0),
-                resample=Image.Resampling.BICUBIC,
+            return strip.resize(
+                (w, amount),
+                Image.Resampling.BICUBIC,
             )
-            return stretched.crop((0, 0, w, amount))
 
-        else:
+        if side == "bottom":
             strip = im.crop((0, h - strip_h, w, h))
 
-            out_h = amount + strip_h
-            stretched = strip.transform(
-                (w, out_h),
-                Image.Transform.AFFINE,
-                (1, 0, 0, 0, strip_h / out_h, 0),
-                resample=Image.Resampling.BICUBIC,
+            return strip.resize(
+                (w, amount),
+                Image.Resampling.BICUBIC,
             )
-            return stretched.crop((0, strip_h, w, out_h))
 
     raise ValueError(f"Unknown edge: {side}")
 
@@ -261,10 +237,6 @@ def _stretch_horizontal_strip(
 ) -> Image.Image:
     """Take a horizontal strip from the complete image and stretch it
     vertically to the requested height.
-
-    The complete width is preserved. This is intentionally different from
-    _stretch_edge(): for top/bottom the strip must retain the already
-    rendered left + content + right structure.
     """
     if amount <= 0:
         return Image.new("RGB", (im.width, 1))
@@ -279,11 +251,27 @@ def _stretch_horizontal_strip(
     else:
         raise ValueError(f"Unknown horizontal edge: {side}")
 
+    # DEBUG: prüfen, welche Farben tatsächlich im Streifen liegen
+    print(
+        "STRIP PIXELS:",
+        side,
+        "size=", strip.size,
+        [
+            strip.getpixel((x, strip.height // 2))
+            for x in [
+                0,
+                strip.width // 4,
+                strip.width // 2,
+                (strip.width * 3) // 4,
+                strip.width - 1,
+            ]
+        ],
+    )
+
     return strip.resize(
         (w, amount),
         Image.Resampling.BICUBIC,
     )
-
 
 def _compose_bleed(
     content: Image.Image,
@@ -312,6 +300,15 @@ def _compose_bleed(
     Thus top/bottom include the already rendered left/right areas and the
     corners naturally belong to the top/bottom strips.
     """
+
+    print("EDGE STYLES:", edge_styles)
+    print("EDGES:", {
+        "top": top_px,
+        "bottom": bottom_px,
+        "left": left_px,
+        "right": right_px,
+    })
+
     target_w = card_w + left_px + right_px
     target_h = card_h + top_px + bottom_px
 
@@ -419,6 +416,33 @@ def _compose_bleed(
         content.height,
     )
 
+    # Jetzt ist der komplette Content-Bereich fertig:
+    # linker Rand + echtes Content-Bild + rechter Rand.
+    # Diese fertige Fläche dient als Quelle für TOP/BOTTOM.
+    out.paste(content, (image_x, image_y))
+    print("FINAL SOURCE:", out.size)
+    print("IMAGE X:", image_x)
+    print("IMAGE RIGHT:", image_right)
+    
+    y = image_y + content.height // 2
+    
+    print("LEFT AREA:",
+          [out.getpixel((x, y))
+           for x in [0, 50, 100, 150, 200]])
+    
+    print("CONTENT:",
+          [out.getpixel((x, y))
+           for x in [image_x,
+                     image_x + content.width // 3,
+                     image_x + (content.width * 2) // 3,
+                     image_right - 1]])
+    
+    print("RIGHT AREA:",
+          [out.getpixel((x, y))
+           for x in [image_right,
+                     image_right + 20,
+                     image_right + 50]
+           if x < out.width])
     # ------------------------------------------------------------
     # TOP / BOTTOM
     # ------------------------------------------------------------
@@ -549,7 +573,23 @@ def prepare_rectangular_card(
         content_width_px,
         content_height_px,
     )
-
+    print("IM:", im.size)
+    print("CONTENT:", content.size)
+    print("CONTENT POS:", content_x, content_y)
+    
+    # Debug: Farben an drei horizontal verteilten Stellen prüfen.
+    for name, image in (("IM", im), ("CONTENT", content)):
+        y = image.height // 2
+        xs = [
+            image.width // 6,
+            image.width // 2,
+            image.width * 5 // 6,
+        ]
+        print(
+            name,
+            "middle row:",
+            [image.getpixel((x, y)) for x in xs],
+        )
     return _compose_bleed(
         content,
         im,
