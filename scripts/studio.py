@@ -154,11 +154,41 @@ def parse_env(path: Path) -> dict[str, str]:
     return env
 
 
+# Persisted rectangular-card edge-style preference, one file for both Studio
+# and (should it ever be scripted directly) the plain ./cards CLI to share --
+# whichever was used last sets the default for next time, matching how the
+# print/RFID/sync state already lives visibly under the library's status/.
+RECTANGULAR_STYLE_FILE = espuino.STATUS_DIR / "rectangular-style.json"
+DEFAULT_EDGE_STYLES = {"top": "stretch", "bottom": "stretch",
+                       "left": "stretch", "right": "stretch"}
+
+
+def load_edge_styles() -> dict[str, str]:
+    """The last-used per-edge style, falling back to DEFAULT_EDGE_STYLES for
+    a missing file, a corrupt file, or any edge the file doesn't mention (an
+    invalid style name is silently replaced by the default too, rather than
+    ever passing something cards.py doesn't recognise)."""
+    try:
+        data = json.loads(RECTANGULAR_STYLE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {side: data.get(side) if data.get(side) in cards.EDGE_STYLES else default
+            for side, default in DEFAULT_EDGE_STYLES.items()}
+
+
+def save_edge_styles(styles: dict[str, str]) -> None:
+    RECTANGULAR_STYLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RECTANGULAR_STYLE_FILE.write_text(json.dumps(styles, indent=2), encoding="utf-8")
+
+
 class Studio:
     def __init__(self, cfg: espuino.Config, token: str | None,
                  port: int = DEFAULT_PORT, cards_enabled: bool = True,
                  agent_enabled: bool = True, print_tab_enabled: bool = True,
-                 rectangular_cards: float | None = None):
+                 rectangular_cards: float | None = None,
+                 blur_radius: float = cards.DEFAULT_BLUR_RADIUS):
         self.cfg = cfg
         self.token = token
         self.port = port
@@ -166,6 +196,11 @@ class Studio:
         self.print_tab_enabled = print_tab_enabled
         self.agent_enabled = agent_enabled  # --no-agent: hide agent tab, 404 its API
         self.rectangular_cards = rectangular_cards
+        # --blur-radius: fixed at startup, not a per-print-run choice (see
+        # RECTANGULAR_STYLE_FILE for what IS chosen per run: which of the
+        # four edges uses which style).
+        self.blur_radius = blur_radius
+        self.edge_styles = load_edge_styles()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.agent: studio_agent.SessionManager | None = None
 
@@ -668,8 +703,38 @@ class Studio:
             "rfid": {"listening": self.rfid_listening},
             "player": self._player,
             "tools": {"ffmpeg": self._ffmpeg_state()},
-            "features": {"cards": self.cards_enabled, "agent": self.agent_enabled, "printTab": self.print_tab_enabled,},
+            "features": {"cards": self.cards_enabled, "agent": self.agent_enabled, "printTab": self.print_tab_enabled,
+                        "rectangularCards": self.rectangular_cards is not None},
+            "edgeStyles": self.edge_styles,
+            "edgeStyleChoices": list(cards.EDGE_STYLES),
         })
+
+
+    async def h_edge_styles(self, request: web.Request) -> web.Response:
+        body = await _json_body(request)
+        raw_styles = body.get("edgeStyles")
+    
+        if not isinstance(raw_styles, dict):
+            return web.json_response(
+                {"error": "Ungültige Randgestaltung"},
+                status=400
+            )
+    
+        edge_styles = dict(self.edge_styles)
+    
+        for side in DEFAULT_EDGE_STYLES:
+            value = raw_styles.get(side)
+            if value in cards.EDGE_STYLES:
+                edge_styles[side] = value
+    
+        self.edge_styles = edge_styles
+        save_edge_styles(edge_styles)
+    
+        return web.json_response({
+            "ok": True,
+            "edgeStyles": self.edge_styles,
+        })
+
 
     def _ffmpeg_state(self) -> dict:
         """ffmpeg is the one dependency the user has to supply themselves on
@@ -868,10 +933,23 @@ class Studio:
         if self.cards_running:
             return web.json_response({"error": "Karten-Job läuft bereits"},
                                      status=409)
+        # Only meaningful in rectangular mode; a request from the square/PDF
+        # path simply won't send this. Unknown edge names are ignored rather
+        # than rejected, invalid style values fall back per-edge below.
+        edge_styles = dict(self.edge_styles)
+        raw_styles = body.get("edgeStyles")
+        if isinstance(raw_styles, dict):
+            for side in DEFAULT_EDGE_STYLES:
+                value = raw_styles.get(side)
+                if value in cards.EDGE_STYLES:
+                    edge_styles[side] = value
         self.cards_running = True
         try:
             result = await self.loop.run_in_executor(
-                None, lambda: self._render_sheet(rels))
+                None, lambda: self._render_sheet(rels, edge_styles))
+            if self.rectangular_cards is not None:
+                self.edge_styles = edge_styles
+                save_edge_styles(edge_styles)
             self.emit({"t": "cards.done", "code": 0})
             return web.json_response({"ok": True, **result})
         except FileNotFoundError as exc:
@@ -887,7 +965,7 @@ class Studio:
             await self.rescan()
             self.emit({"t": "state.changed"})
 
-    def _render_sheet(self, rels: list[str]) -> dict:
+    def _render_sheet(self, rels: list[str], edge_styles: dict[str, str] | None = None) -> dict:
         """Render selected covers either as the traditional PDF or as
         individual rectangular JPGs."""
         covers_dir = espuino.DEFAULT_COVERS_DIR
@@ -902,6 +980,7 @@ class Studio:
         # New rectangular path: one JPG per cover, no A4 page/PDF.
         if self.rectangular_cards is not None:
             out_files = []
+            styles = edge_styles or self.edge_styles
 
             for cover in covers:
                 card = cards.prepare_rectangular_card(
@@ -912,6 +991,8 @@ class Studio:
                     cards.cm(cards.RECTANGULAR_BOTTOM_BLEED_CM),
                     trim=True,
                     distortion=self.rectangular_cards,
+                    edge_styles=styles,
+                    blur_radius=self.blur_radius,
                 )
 
                 distortion = f"{self.rectangular_cards:g}"
@@ -1376,6 +1457,7 @@ class Studio:
         app.router.add_get("/thumb", self.h_thumb)
         app.router.add_get("/ws", self.h_ws)
         app.router.add_get("/api/state", self.h_state)
+        app.router.add_post("/api/edge-styles", self.h_edge_styles)
         app.router.add_post("/api/device/ping", self.h_device_ping)
         app.router.add_post("/api/sync", self.h_sync)
         app.router.add_post("/api/cards/print", self.h_cards_print)
@@ -1446,6 +1528,16 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DISTORTION",
         help="Use the rectangular-card print path; optionally specify distortion (default: 0.02).",
     )
+    parser.add_argument(
+        "--blur-radius",
+        type=float,
+        default=cards.DEFAULT_BLUR_RADIUS,
+        metavar="RADIUS",
+        help="Gaussian blur radius for the 'stretch-blur' and 'zoom' edge "
+             f"styles (default: {cards.DEFAULT_BLUR_RADIUS:g}). Fixed for the "
+             "whole run, unlike the per-edge style choice, which is set per "
+             "print job in Studio itself and remembered from then on.",
+    )
     parser.add_argument("--no-cards", action="store_true",
                         help="Hide the card-printing tab and column (feature disabled)")
     parser.add_argument("--no-print-tab", action="store_true",
@@ -1468,6 +1560,7 @@ def main(argv: list[str] | None = None) -> int:
         agent_enabled=not args.no_agent,
         print_tab_enabled=not args.no_print_tab,
         rectangular_cards=args.rectangular_cards,
+        blur_radius=args.blur_radius,
     )
     app = studio.build_app()
 

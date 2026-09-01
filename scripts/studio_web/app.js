@@ -204,6 +204,8 @@ const State = {
   /** @type {Set<string>|null} */ knownUnitIds: null,    // prev fetch's ids; new ones flash
   /** @type {Player|null} */ player: null,               // now-playing on the device
   /** @type {{cards?: boolean, agent?: boolean}} */ features: {},  // server-side feature flags
+  /** @type {Record<string, string>} */ edgeStyles: {},           // last-used per-edge rectangular-card style
+  /** @type {string[]} */ edgeStyleChoices: [],                    // valid style values, from the server
   /** @type {"date"|"alpha"} */ sortMode: loadSortMode(), // library sort, persisted client-side
   _reconnecting: false,
 };
@@ -297,6 +299,12 @@ async function refreshState(refresh) {
     for (const id of [...State.unitSyncPct.keys()]) if (!State.unitSync.has(id)) State.unitSyncPct.delete(id);
     State.player = s.player || null;
     State.features = s.features || {};
+    State.edgeStyles = s.edgeStyles || {};
+    State.edgeStyleChoices = s.edgeStyleChoices || [];
+    
+    initEdgeStyleSettings();
+    applySettingsTabVisibility();
+    
     applyFeatureVisibility();
     renderDeviceChip(s.device);
     renderToolBanner(s.tools);
@@ -347,6 +355,60 @@ function applyFeatureVisibility() {
   if (libDl) libDl.hidden = !agentOn;
 }
 
+// Human-readable labels for cards.EDGE_STYLES values (kept in sync manually --
+// there are only four, and adding a fifth needs a code change here anyway to
+// wire it into cards.py, so no real risk of drifting unnoticed).
+const EDGE_STYLE_LABELS = {
+  white: "Weiß",
+  stretch: "Verzerrt",
+  "stretch-blur": "Verzerrt, weich",
+  zoom: "Hintergrund, weich",
+};
+
+// Populated once (guarded below), not on every refresh: re-syncing the
+// dropdowns' selected values from server state on every /api/state poll
+// would silently discard whatever the user just picked but hasn't submitted
+// (rendered) yet. The options list itself is static, so re-populating it
+// repeatedly would be harmless, but there's no reason to either.
+function initEdgeStyleSettings() {
+  const bar = $("#edge-style-bar");
+  if (!bar) return;
+
+  const choices = State.edgeStyleChoices.length
+    ? State.edgeStyleChoices
+    : ["white", "stretch", "stretch-blur", "zoom"];
+
+  for (const side of ["top", "bottom", "left", "right"]) {
+    const sel = $("#edge-" + side);
+    if (!sel) continue;
+
+    sel.replaceChildren(
+      ...choices.map(v =>
+        el("option", {
+          value: v,
+          text: EDGE_STYLE_LABELS[v] || v
+        })
+      )
+    );
+
+    sel.value = State.edgeStyles[side] || "stretch";
+
+    sel.addEventListener("change", async () => {
+      State.edgeStyles[side] = sel.value;
+
+      try {
+        await api("/api/edge-styles", "POST", {
+          edgeStyles: State.edgeStyles
+        });
+      } catch (/** @type {any} */ e) {
+        console.error("Randgestaltung konnte nicht gespeichert werden:", e);
+      }
+    });
+  }
+
+  bar.hidden = false;
+}
+
 function initTabs() {
   $$(".tab").forEach(btn => btn.addEventListener("click", () => {
     $$(".tab").forEach(b => b.classList.toggle("active", b === btn));
@@ -378,6 +440,14 @@ function appendLog(id, line, isErr) {
   pane.append(el("div", { class: isErr ? "err" : null, text: String(line == null ? "" : line) }));
   if (atBottom) pane.scrollTop = pane.scrollHeight;
 }
+
+function applySettingsTabVisibility() {
+  const tab = $('.tab[data-tab="einstellungen"]');
+  if (!tab) return;
+
+  tab.hidden = State.features.rectangularCards !== true;
+}
+
 
 /* =============================== 5. Bibliothek =============================== */
 
@@ -701,8 +771,17 @@ async function printSelected() {
     .filter(u => PrintSel.has(u.id) && u.cover && u.cover.status === "present")
     .map(u => /** @type {string} */ (u.cover && u.cover.rel));
   if (!rels.length) return;
+  const body = { rels };
+  if (State.features.rectangularCards === true) {
+    const edgeStyles = {};
+    for (const side of ["top", "bottom", "left", "right"]) {
+      const sel = $("#edge-" + side);
+      if (sel) edgeStyles[side] = sel.value;
+    }
+    body.edgeStyles = edgeStyles;
+  }
   try {
-    await api("/api/cards/render", "POST", { rels });
+    await api("/api/cards/render", "POST", body);
     $("#cards-log").replaceChildren();
     setCardsRunning(true);
     PrintSel.clear();
@@ -1140,8 +1219,17 @@ function clearSelection() {
 async function renderCardsPage() {
   if (State.cardsRunning || !Cards.selection.length) return;
   const rels = Cards.selection.slice();
+  const body = { rels };
+  if (State.features.rectangularCards === true) {
+    const edgeStyles = {};
+    for (const side of ["top", "bottom", "left", "right"]) {
+      const sel = $("#edge-" + side);
+      if (sel) edgeStyles[side] = sel.value;
+    }
+    body.edgeStyles = edgeStyles;
+  }
   try {
-    await api("/api/cards/render", "POST", { rels });
+    await api("/api/cards/render", "POST", body);
     $("#cards-log").replaceChildren();
     setCardsRunning(true);
     appendLog("cards-log", "Seite mit " + rels.length + " Karten wird erzeugt…");
@@ -2031,6 +2119,7 @@ function initShell() {
 
 function init() {
   initShell();
+  initEdgeStyleSettings();
   initTabs();
   initLibrary();
   initSyncCards();

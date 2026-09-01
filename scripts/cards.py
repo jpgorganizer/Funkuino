@@ -35,7 +35,7 @@ import sys
 import time
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 import espuino
 from print_state import PrintState
@@ -56,6 +56,17 @@ RECTANGULAR_CONTENT_HEIGHT_CM = 5.2
 RECTANGULAR_TOP_BLEED_CM = 0.5
 RECTANGULAR_BOTTOM_BLEED_CM = 0.5
 RECTANGULAR_COLS = 2
+
+# Per-edge bleed rendering styles (see cards.py's _compose_bleed): "white" is a
+# flat fill, "stretch"/"stretch-blur" is the original technique (a thin strip
+# of the content edge, stretched -- "-blur" additionally softens it),  "zoom"
+# is the whole source image enlarged to cover the full print canvas and
+# blurred, used as a shared background behind every edge that requests it
+# (and behind the sharp content area, invisibly, since that's painted on top
+# last).
+EDGE_STYLES = ("white", "stretch", "stretch-blur", "zoom")
+DEFAULT_EDGE_STYLE = "stretch"  # matches the original, only-ever-stretch behaviour
+DEFAULT_BLUR_RADIUS = 6.0
 # Minimum white space kept between the card block and the paper edge, so home
 # printers (which cannot print to the very edge) never clip a card.
 PAGE_MARGIN_CM = 0.7
@@ -108,7 +119,7 @@ def prepare_card(path: Path, size_px: int, trim: bool = True) -> Image.Image:
         im = _trim_uniform_border(im)
     im = _centre_square(im)
     if im.size != (size_px, size_px):
-        im = im.resize((size_px, size_px), Image.LANCZOS)
+        im = im.resize((size_px, size_px), Image.BICUBIC)
     return im
 
 def _stretch_edge(
@@ -117,167 +128,396 @@ def _stretch_edge(
     amount: int,
     distortion: float = DEFAULT_DISTORTION,
 ) -> Image.Image:
-    """Extend an image by stretching a strip from one of its edges."""
+    """Extend an image edge outward without mirroring.
+
+    A small strip at the selected edge is used as the source. The strip is
+    stretched only in the outward direction. The inner edge stays fixed,
+    so image features continue naturally into the bleed area.
+
+    ``distortion`` determines how much of the source image is sampled.
+    """
     if amount <= 0:
         return Image.new("RGB", (1, 1))
 
     w, h = im.size
-    fraction = distortion
+    fraction = max(0.0001, min(1.0, distortion))
 
     if side in ("left", "right"):
         strip_w = max(1, min(w, round(w * fraction)))
+
         if side == "left":
+            # Source strip immediately next to the left edge.
             strip = im.crop((0, 0, strip_w, h))
+
+            # Output is wider by ``amount``. The right edge of the source
+            # corresponds to the inner edge of the bleed; the left edge
+            # is pulled outward.
+            out_w = amount + strip_w
+            stretched = strip.transform(
+                (out_w, h),
+                Image.Transform.AFFINE,
+                (strip_w / out_w, 0, 0, 0, 1, 0),
+                resample=Image.Resampling.BICUBIC,
+            )
+            return stretched.crop((0, 0, amount, h))
+
         else:
+            # Source strip immediately next to the right edge.
             strip = im.crop((w - strip_w, 0, w, h))
-        return strip.resize((amount, h), Image.Resampling.LANCZOS)
+
+            out_w = amount + strip_w
+            stretched = strip.transform(
+                (out_w, h),
+                Image.Transform.AFFINE,
+                (strip_w / out_w, 0, 0, 0, 1, 0),
+                resample=Image.Resampling.BICUBIC,
+            )
+            return stretched.crop((strip_w, 0, out_w, h))
 
     if side in ("top", "bottom"):
         strip_h = max(1, min(h, round(h * fraction)))
+
         if side == "top":
             strip = im.crop((0, 0, w, strip_h))
+
+            out_h = amount + strip_h
+            stretched = strip.transform(
+                (w, out_h),
+                Image.Transform.AFFINE,
+                (1, 0, 0, 0, strip_h / out_h, 0),
+                resample=Image.Resampling.BICUBIC,
+            )
+            return stretched.crop((0, 0, w, amount))
+
         else:
             strip = im.crop((0, h - strip_h, w, h))
-        return strip.resize((w, amount), Image.Resampling.LANCZOS)
+
+            out_h = amount + strip_h
+            stretched = strip.transform(
+                (w, out_h),
+                Image.Transform.AFFINE,
+                (1, 0, 0, 0, strip_h / out_h, 0),
+                resample=Image.Resampling.BICUBIC,
+            )
+            return stretched.crop((0, strip_h, w, out_h))
 
     raise ValueError(f"Unknown edge: {side}")
+
+def _blurred_zoom_background(im: Image.Image, target_w: int, target_h: int,
+                             blur_radius: float) -> Image.Image:
+    """Scale ``im`` to *cover* target_w x target_h (crop the excess, never
+    letterbox), then blur it -- the shared full-canvas backdrop for any edge
+    using the 'zoom' style. Unlike _stretch_edge (which samples a thin strip
+    of the already-fitted content area), this zooms the true, unprocessed
+    source image, since a blurred backdrop reads better built from the real
+    artwork than from a narrow re-stretched sliver of it."""
+    w, h = im.size
+    scale = max(target_w / w, target_h / h)
+    scaled_w, scaled_h = max(1, round(w * scale)), max(1, round(h * scale))
+    scaled = im.resize((scaled_w, scaled_h), Image.Resampling.BICUBIC)
+    left = (scaled_w - target_w) // 2
+    top = (scaled_h - target_h) // 2
+    cropped = scaled.crop((left, top, left + target_w, top + target_h))
+    return cropped.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
 
 def _extend_to_size(
     im: Image.Image,
     target_w: int,
     target_h: int,
-    distortion: float = DEFAULT_DISTORTION,
-) -> Image.Image:
-    """Fit proportionally and fill unused space by stretching image edges.
+) -> tuple[Image.Image, int, int]:
+    """Fit the complete image into target_w x target_h.
 
-    The original image is never cropped or non-proportionally distorted.
+    The image is scaled proportionally as large as possible without cropping.
+    It is centred horizontally and aligned to the bottom vertically.
 
-    Square images are fitted by height. Thus an 8x5 target becomes a
-    5x5 original image with 1.5 cm stretched to each side.
+    Returns:
+        fitted image, x position, y position
     """
     w, h = im.size
     if w <= 0 or h <= 0:
         raise ValueError("Image has invalid dimensions")
 
-    if w == h:
-        # Important: square images should be 5x5 cm, not 8x8 cm.
-        scale = target_h / h
-    else:
-        scale = min(target_w / w, target_h / h)
+    scale = min(target_w / w, target_h / h)
 
     fitted_w = max(1, round(w * scale))
     fitted_h = max(1, round(h * scale))
-    fitted = im.resize((fitted_w, fitted_h), Image.Resampling.LANCZOS)
 
-    extra_w = target_w - fitted_w
-    extra_h = target_h - fitted_h
+    fitted = im.resize(
+        (fitted_w, fitted_h),
+        Image.Resampling.BICUBIC,
+    )
 
-    left = extra_w // 2
-    right = extra_w - left
-    top = extra_h // 2
-    bottom = extra_h - top
+    x = (target_w - fitted_w) // 2
+    y = target_h - fitted_h
 
-    out = Image.new("RGB", (target_w, target_h))
-    out.paste(fitted, (left, top))
+    return fitted, x, y
 
-    if left:
-        out.paste(_stretch_edge(fitted, "left", left, distortion), (0, top))
-
-    if right:
-        out.paste(
-            _stretch_edge(fitted, "right", right, distortion),
-            (left + fitted_w, top),
-        )
-
-    if top:
-        out.paste(_stretch_edge(fitted, "top", top, distortion), (left, 0))
-
-    if bottom:
-        out.paste(
-            _stretch_edge(fitted, "bottom", bottom, distortion),
-            (left, top + fitted_h),
-        )
-
-    # Fill corner areas if both horizontal and vertical extension were needed.
-    if left and top:
-        corner = out.crop((0, top, left, top + 1))
-        out.paste(
-            corner.resize((left, top), Image.Resampling.LANCZOS),
-            (0, 0),
-        )
-
-    if right and top:
-        corner = out.crop(
-            (target_w - right, top, target_w, top + 1)
-        )
-        out.paste(
-            corner.resize((right, top), Image.Resampling.LANCZOS),
-            (target_w - right, 0),
-        )
-
-    if left and bottom:
-        corner = out.crop(
-            (0, target_h - bottom, left, target_h - bottom + 1)
-        )
-        out.paste(
-            corner.resize((left, bottom), Image.Resampling.LANCZOS),
-            (0, target_h - bottom),
-        )
-
-    if right and bottom:
-        corner = out.crop(
-            (
-                target_w - right,
-                target_h - bottom,
-                target_w,
-                target_h - bottom + 1,
-            )
-        )
-        out.paste(
-            corner.resize((right, bottom), Image.Resampling.LANCZOS),
-            (target_w - right, target_h - bottom),
-        )
-
-    return out
-
-
-def _add_bleed(
+def _stretch_horizontal_strip(
     im: Image.Image,
-    top_bleed_px: int,
-    bottom_bleed_px: int,
+    side: str,
+    amount: int,
     distortion: float = DEFAULT_DISTORTION,
 ) -> Image.Image:
-    """Add top and bottom bleed by stretching the respective image edges."""
-    if top_bleed_px <= 0 and bottom_bleed_px <= 0:
-        return im
+    """Take a horizontal strip from the complete image and stretch it
+    vertically to the requested height.
 
-    top_bleed = (
-        _stretch_edge(im, "top", top_bleed_px, distortion)
-        if top_bleed_px > 0
-        else None
+    The complete width is preserved. This is intentionally different from
+    _stretch_edge(): for top/bottom the strip must retain the already
+    rendered left + content + right structure.
+    """
+    if amount <= 0:
+        return Image.new("RGB", (im.width, 1))
+
+    w, h = im.size
+    strip_h = max(1, min(h, round(h * distortion)))
+
+    if side == "top":
+        strip = im.crop((0, 0, w, strip_h))
+    elif side == "bottom":
+        strip = im.crop((0, h - strip_h, w, h))
+    else:
+        raise ValueError(f"Unknown horizontal edge: {side}")
+
+    return strip.resize(
+        (w, amount),
+        Image.Resampling.BICUBIC,
     )
-    bottom_bleed = (
-        _stretch_edge(im, "bottom", bottom_bleed_px, distortion)
-        if bottom_bleed_px > 0
-        else None
+
+
+def _compose_bleed(
+    content: Image.Image,
+    source: Image.Image,
+    card_w: int,
+    card_h: int,
+    content_x: int,
+    content_y: int,
+    top_px: int,
+    bottom_px: int,
+    left_px: int,
+    right_px: int,
+    edge_styles: dict[str, str],
+    blur_radius: float = DEFAULT_BLUR_RADIUS,
+    distortion: float = DEFAULT_DISTORTION,
+) -> Image.Image:
+    """Compose the complete rectangular print image.
+
+    Rendering order:
+
+      1. Create the complete canvas.
+      2. Render left/right from the fitted content.
+      3. Use the resulting L + CONTENT + R area as the source for top/bottom.
+      4. Put the sharp content back on top.
+
+    Thus top/bottom include the already rendered left/right areas and the
+    corners naturally belong to the top/bottom strips.
+    """
+    target_w = card_w + left_px + right_px
+    target_h = card_h + top_px + bottom_px
+
+    # Position of the sharp content in the final image.
+    image_x = left_px + content_x
+    image_y = top_px + content_y
+
+    image_right = image_x + content.width
+    image_bottom = image_y + content.height
+
+    styles = {
+        side: edge_styles.get(side, DEFAULT_EDGE_STYLE)
+        for side in ("top", "bottom", "left", "right")
+    }
+
+    # Start with the zoom background. Individual edges can overwrite it.
+    out = _blurred_zoom_background(
+        source,
+        target_w,
+        target_h,
+        blur_radius,
     )
 
-    out = Image.new(
-        "RGB",
-        (im.width, im.height + top_bleed_px + bottom_bleed_px),
-    )
+    # ------------------------------------------------------------
+    # LEFT / RIGHT
+    # ------------------------------------------------------------
+    #
+    # These are deliberately rendered first.
+    #
+    def render_side(
+        side: str,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+    ) -> None:
+        if width <= 0 or height <= 0:
+            return
 
-    if top_bleed is not None:
-        out.paste(top_bleed, (0, 0))
+        style = styles[side]
 
-    out.paste(im, (0, top_bleed_px))
+        if style == "zoom":
+            # The zoom background is already there.
+            return
 
-    if bottom_bleed is not None:
-        out.paste(
-            bottom_bleed,
-            (0, top_bleed_px + im.height),
+        if style == "white":
+            out.paste(
+                Image.new("RGB", (width, height), "white"),
+                (x, y),
+            )
+            return
+
+        if style in ("stretch", "stretch-blur"):
+            strip = _stretch_edge(
+                content,
+                side,
+                width,
+                distortion,
+            )
+
+            # _stretch_edge() normally already has the correct height.
+            if strip.size != (width, height):
+                strip = strip.resize(
+                    (width, height),
+                    Image.Resampling.BICUBIC,
+                )
+
+            if style == "stretch-blur":
+                strip = strip.filter(
+                    ImageFilter.GaussianBlur(radius=blur_radius)
+                )
+
+            out.paste(strip, (x, y))
+            return
+
+        # Unknown value: retain the old stretch behaviour.
+        strip = _stretch_edge(
+            content,
+            side,
+            width,
+            distortion,
         )
+
+        if strip.size != (width, height):
+            strip = strip.resize(
+                (width, height),
+                Image.Resampling.BICUBIC,
+            )
+
+        out.paste(strip, (x, y))
+
+    render_side(
+        "left",
+        0,
+        image_y,
+        image_x,
+        content.height,
+    )
+
+    render_side(
+        "right",
+        image_right,
+        image_y,
+        target_w - image_right,
+        content.height,
+    )
+
+    # ------------------------------------------------------------
+    # TOP / BOTTOM
+    # ------------------------------------------------------------
+    #
+    # IMPORTANT:
+    #
+    # At this point the horizontal band already contains:
+    #
+    #     LEFT + CONTENT + RIGHT
+    #
+    # We take the source strip from exactly this finished band.
+    #
+    # The strip keeps its complete width and is only scaled vertically.
+    #
+    def render_top_bottom(
+        side: str,
+        y: int,
+        height: int,
+    ) -> None:
+        if height <= 0:
+            return
+
+        style = styles[side]
+
+        if style == "zoom":
+            # Already provided by the background.
+            return
+
+        if style == "white":
+            out.paste(
+                Image.new("RGB", (target_w, height), "white"),
+                (0, y),
+            )
+            return
+
+        if style in ("stretch", "stretch-blur"):
+            # Source is the already constructed horizontal band.
+            strip_source = out.crop(
+                (
+                    0,
+                    image_y,
+                    target_w,
+                    image_bottom,
+                )
+            )
+
+            strip = _stretch_horizontal_strip(
+                strip_source,
+                side,
+                height,
+                distortion,
+            )
+
+            if style == "stretch-blur":
+                strip = strip.filter(
+                    ImageFilter.GaussianBlur(radius=blur_radius)
+                )
+
+            out.paste(strip, (0, y))
+            return
+
+        # Unknown value: use stretch behaviour.
+        strip_source = out.crop(
+            (
+                0,
+                image_y,
+                target_w,
+                image_bottom,
+            )
+        )
+
+        strip = _stretch_horizontal_strip(
+            strip_source,
+            side,
+            height,
+            distortion,
+        )
+
+        out.paste(strip, (0, y))
+
+    render_top_bottom(
+        "top",
+        0,
+        image_y,
+    )
+
+    render_top_bottom(
+        "bottom",
+        image_bottom,
+        target_h - image_bottom,
+    )
+
+    # ------------------------------------------------------------
+    # SHARP CONTENT
+    # ------------------------------------------------------------
+    #
+    # The content itself must always remain untouched and sharp.
+    #
+    out.paste(content, (image_x, image_y))
 
     return out
 
@@ -289,27 +529,42 @@ def prepare_rectangular_card(
     bottom_bleed_px: int,
     trim: bool = True,
     distortion: float = DEFAULT_DISTORTION,
+    edge_styles: dict[str, str] | None = None,
+    blur_radius: float = DEFAULT_BLUR_RADIUS,
+    left_bleed_px: int = 0,
+    right_bleed_px: int = 0,
 ) -> Image.Image:
-    """Prepare an 8x5 finished card on 8x6 cm print stock."""
+    """Prepare an 8x5 card on 8x6 cm print stock.
+
+    The source image is fitted completely into the content area,
+    horizontally centred and vertically bottom-aligned.
+    """
     im = Image.open(path).convert("RGB")
 
     if trim:
         im = _trim_uniform_border(im)
 
-    content = _extend_to_size(
+    content, content_x, content_y = _extend_to_size(
         im,
         content_width_px,
         content_height_px,
-        distortion,
     )
 
-    return _add_bleed(
+    return _compose_bleed(
         content,
+        im,
+        content_width_px,
+        content_height_px,
+        content_x,
+        content_y,
         top_bleed_px,
         bottom_bleed_px,
+        left_bleed_px,
+        right_bleed_px,
+        edge_styles or {},
+        blur_radius,
         distortion,
     )
-
 # --- page layout ------------------------------------------------------------
 def _draw_cut_marks(draw: ImageDraw.ImageDraw, page_w: int, page_h: int,
                     ox: int, oy: int, card_px: int, cols: int, rows: int) -> None:

@@ -27,6 +27,7 @@
   <button class="tab" data-tab="agent" role="tab">Agent</button>
   <button class="tab" data-tab="sync" role="tab">Sync<span id="sync-tab-spin" class="tab-spin" hidden aria-hidden="true"></span></button>
   <button class="tab" data-tab="karten" role="tab">Kartendruck</button>
+  <button class="tab" data-tab="einstellungen" id="settings-tab">Einstellungen</button>
 </nav>
 
 <div id="rfid-banner" class="rfid-banner" hidden></div>
@@ -178,10 +179,42 @@
       <div id="cards-log" class="logpane" style="margin-top:10px"></div>
     </details>
   </section>
+  
+  <section id="tab-einstellungen" class="tabpane" role="tabpanel">
+    <div class="panel panel-pad">
+      <h2>Einstellungen</h2>
+  
+      <section class="settings-section">
+        <h3>Druck-Randgestaltung</h3>
+  
+        <div id="edge-style-bar" class="edge-style-bar">
+          <span class="field-label">Rand:</span>
+  
+          <label>Oben
+            <select id="edge-top" class="input"></select>
+          </label>
+  
+          <label>Unten
+            <select id="edge-bottom" class="input"></select>
+          </label>
+  
+          <label>Links
+            <select id="edge-left" class="input"></select>
+          </label>
+  
+          <label>Rechts
+            <select id="edge-right" class="input"></select>
+          </label>
+        </div>
+      </section>
+    </div>
+  </section>  
+  
 </main>
 
 <div id="print-bar" class="print-bar" hidden>
   <span id="print-bar-count" class="pb-count"></span>
+  <div id="print-edge-slot"></div>
   <span class="spacer"></span>
   <button id="print-bar-go" class="btn primary">Drucken</button>
   <button id="print-bar-clear" class="in-dismiss" title="Auswahl leeren">×</button>
