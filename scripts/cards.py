@@ -252,21 +252,21 @@ def _stretch_horizontal_strip(
         raise ValueError(f"Unknown horizontal edge: {side}")
 
     # DEBUG: prüfen, welche Farben tatsächlich im Streifen liegen
-    print(
-        "STRIP PIXELS:",
-        side,
-        "size=", strip.size,
-        [
-            strip.getpixel((x, strip.height // 2))
-            for x in [
-                0,
-                strip.width // 4,
-                strip.width // 2,
-                (strip.width * 3) // 4,
-                strip.width - 1,
-            ]
-        ],
-    )
+    #print(
+    #    "STRIP PIXELS:",
+    #    side,
+    #    "size=", strip.size,
+    #    [
+    #        strip.getpixel((x, strip.height // 2))
+    #        for x in [
+    #            0,
+    #            strip.width // 4,
+    #            strip.width // 2,
+    #            (strip.width * 3) // 4,
+    #            strip.width - 1,
+    #        ]
+    #    ],
+    #)
 
     return strip.resize(
         (w, amount),
@@ -301,13 +301,14 @@ def _compose_bleed(
     corners naturally belong to the top/bottom strips.
     """
 
-    print("EDGE STYLES:", edge_styles)
-    print("EDGES:", {
-        "top": top_px,
-        "bottom": bottom_px,
-        "left": left_px,
-        "right": right_px,
-    })
+    #DEBUG
+    #print("EDGE STYLES:", edge_styles)
+    #print("EDGES:", {
+    #    "top": top_px,
+    #    "bottom": bottom_px,
+    #    "left": left_px,
+    #    "right": right_px,
+    #})
 
     target_w = card_w + left_px + right_px
     target_h = card_h + top_px + bottom_px
@@ -420,29 +421,35 @@ def _compose_bleed(
     # linker Rand + echtes Content-Bild + rechter Rand.
     # Diese fertige Fläche dient als Quelle für TOP/BOTTOM.
     out.paste(content, (image_x, image_y))
-    print("FINAL SOURCE:", out.size)
-    print("IMAGE X:", image_x)
-    print("IMAGE RIGHT:", image_right)
+
+    #DEBUG
+    #print("FINAL SOURCE:", out.size)
+    #print("IMAGE X:", image_x)
+    #print("IMAGE RIGHT:", image_right)
     
     y = image_y + content.height // 2
     
-    print("LEFT AREA:",
-          [out.getpixel((x, y))
-           for x in [0, 50, 100, 150, 200]])
-    
-    print("CONTENT:",
-          [out.getpixel((x, y))
-           for x in [image_x,
-                     image_x + content.width // 3,
-                     image_x + (content.width * 2) // 3,
-                     image_right - 1]])
-    
-    print("RIGHT AREA:",
-          [out.getpixel((x, y))
-           for x in [image_right,
-                     image_right + 20,
-                     image_right + 50]
-           if x < out.width])
+    #DEBUG
+    #print("LEFT AREA:",
+    #      [out.getpixel((x, y))
+    #       for x in [0, 50, 100, 150, 200]])
+
+    #DEBUG
+    #print("CONTENT:",
+    #      [out.getpixel((x, y))
+    #       for x in [image_x,
+    #                 image_x + content.width // 3,
+    #                 image_x + (content.width * 2) // 3,
+    #                 image_right - 1]])
+
+    #DEBUG
+    #print("RIGHT AREA:",
+    #      [out.getpixel((x, y))
+    #       for x in [image_right,
+    #                 image_right + 20,
+    #                 image_right + 50]
+    #       if x < out.width])
+
     # ------------------------------------------------------------
     # TOP / BOTTOM
     # ------------------------------------------------------------
@@ -573,23 +580,26 @@ def prepare_rectangular_card(
         content_width_px,
         content_height_px,
     )
-    print("IM:", im.size)
-    print("CONTENT:", content.size)
-    print("CONTENT POS:", content_x, content_y)
+
+    #DEBUG
+    #print("IM:", im.size)
+    #print("CONTENT:", content.size)
+    #print("CONTENT POS:", content_x, content_y)
     
-    # Debug: Farben an drei horizontal verteilten Stellen prüfen.
-    for name, image in (("IM", im), ("CONTENT", content)):
-        y = image.height // 2
-        xs = [
-            image.width // 6,
-            image.width // 2,
-            image.width * 5 // 6,
-        ]
-        print(
-            name,
-            "middle row:",
-            [image.getpixel((x, y)) for x in xs],
-        )
+    #DEBUG: Farben an drei horizontal verteilten Stellen prüfen.
+    #for name, image in (("IM", im), ("CONTENT", content)):
+    #    y = image.height // 2
+    #    xs = [
+    #        image.width // 6,
+    #        image.width // 2,
+    #        image.width * 5 // 6,
+    #    ]
+    #    print(
+    #        name,
+    #        "middle row:",
+    #        [image.getpixel((x, y)) for x in xs],
+    #    )
+
     return _compose_bleed(
         content,
         im,
