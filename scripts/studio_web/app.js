@@ -193,6 +193,15 @@ function saveSortMode(mode) {
   } catch { /* ignore: not persisted this session, still applied in-memory */ }
 }
 
+const DEFAULT_RECTANGULAR_SETTINGS = {
+  contentWidthCm: 8.2,
+  contentHeightCm: 5.2,
+  topBleedCm: 0.5,
+  bottomBleedCm: 0.5,
+  leftBleedCm: 0.0,
+  rightBleedCm: 0.0,
+};
+
 const State = {
   /** @type {StatePayload|null} */ data: null,   // last /api/state payload
   lastSeq: 0,                       // highest applied global seq
@@ -206,6 +215,8 @@ const State = {
   /** @type {{cards?: boolean, agent?: boolean}} */ features: {},  // server-side feature flags
   /** @type {Record<string, string>} */ edgeStyles: {},           // last-used per-edge rectangular-card style
   /** @type {string[]} */ edgeStyleChoices: [],                    // valid style values, from the server
+  rectangularSettings: { ...DEFAULT_RECTANGULAR_SETTINGS },       // shown immediately; server state replaces it on first refresh
+  /** @type {Record<string, number>} */ rectangularSettings: {},    // persisted rectangular-card dimensions
   /** @type {"date"|"alpha"} */ sortMode: loadSortMode(), // library sort, persisted client-side
   _reconnecting: false,
 };
@@ -301,8 +312,10 @@ async function refreshState(refresh) {
     State.features = s.features || {};
     State.edgeStyles = s.edgeStyles || {};
     State.edgeStyleChoices = s.edgeStyleChoices || [];
+    State.rectangularSettings = s.rectangularSettings || {};
     
     initEdgeStyleSettings();
+    initRectangularSettings();
     applySettingsTabVisibility();
     
     applyFeatureVisibility();
@@ -1082,6 +1095,86 @@ async function pingDevice() {
     renderDeviceChip({ reachable: false, info: dev.info, host: dev.host });
     toast("Gerät nicht erreichbar");
   } finally { chip.style.opacity = ""; }
+}
+
+function initRectangularSettings() {
+  const wrap = $("#rectangular-settings");
+  if (!wrap) return;
+
+  const fields = {
+    contentWidthCm: $("#rect-content-width"),
+    contentHeightCm: $("#rect-content-height"),
+    topBleedCm: $("#rect-top-bleed"),
+    bottomBleedCm: $("#rect-bottom-bleed"),
+    leftBleedCm: $("#rect-left-bleed"),
+    rightBleedCm: $("#rect-right-bleed"),
+  };
+  if (Object.values(fields).some(f => !f)) return;
+
+  const updatePrintSize = () => {
+    const w = Number(fields.contentWidthCm.value) + Number(fields.leftBleedCm.value) + Number(fields.rightBleedCm.value);
+    const h = Number(fields.contentHeightCm.value) + Number(fields.topBleedCm.value) + Number(fields.bottomBleedCm.value);
+    const out = $("#rect-print-size");
+    if (out) out.textContent = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
+      ? `${formatCm(w)} × ${formatCm(h)} cm`
+      : "–";
+  };
+
+  const saveSettings = async () => {
+    const rectangularSettings = {};
+    for (const [key, field] of Object.entries(fields)) {
+      const value = Number(field.value);
+      if (!Number.isFinite(value) || (key.startsWith("content") ? value <= 0 : value < 0) || value > 100) {
+        toast("Bitte gültige Kartenabmessungen eingeben.");
+        field.focus();
+        return;
+      }
+      rectangularSettings[key] = value;
+    }
+
+    try {
+      const result = await api("/api/rectangular-settings", "POST", { rectangularSettings });
+      State.rectangularSettings = result.rectangularSettings || rectangularSettings;
+      setRectangularSettingsFields(State.rectangularSettings);
+      toast("Kartenformat gespeichert.", "ok");
+    } catch (/** @type {any} */ e) {
+      toast("Kartenformat konnte nicht gespeichert werden.");
+    }
+  };
+
+  if (!wrap.dataset.initialized) {
+    wrap.dataset.initialized = "1";
+    for (const field of Object.values(fields)) {
+      field.addEventListener("input", updatePrintSize);
+      field.addEventListener("change", saveSettings);
+    }
+  }
+
+  setRectangularSettingsFields(State.rectangularSettings);
+}
+
+function setRectangularSettingsFields(settings) {
+  const map = {
+    contentWidthCm: $("#rect-content-width"),
+    contentHeightCm: $("#rect-content-height"),
+    topBleedCm: $("#rect-top-bleed"),
+    bottomBleedCm: $("#rect-bottom-bleed"),
+    leftBleedCm: $("#rect-left-bleed"),
+    rightBleedCm: $("#rect-right-bleed"),
+  };
+  for (const [key, field] of Object.entries(map)) {
+    if (field && settings[key] != null) field.value = String(settings[key]);
+  }
+  const w = Number(settings.contentWidthCm) + Number(settings.leftBleedCm) + Number(settings.rightBleedCm);
+  const h = Number(settings.contentHeightCm) + Number(settings.topBleedCm) + Number(settings.bottomBleedCm);
+  const out = $("#rect-print-size");
+  if (out) out.textContent = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
+    ? `${formatCm(w)} × ${formatCm(h)} cm`
+    : "–";
+}
+
+function formatCm(value) {
+  return Number(value.toFixed(2)).toString().replace(".", ",");
 }
 
 /* =============================== 7. Karten =============================== */
@@ -2120,6 +2213,7 @@ function initShell() {
 function init() {
   initShell();
   initEdgeStyleSettings();
+  initRectangularSettings();
   initTabs();
   initLibrary();
   initSyncCards();

@@ -159,8 +159,18 @@ def parse_env(path: Path) -> dict[str, str]:
 # whichever was used last sets the default for next time, matching how the
 # print/RFID/sync state already lives visibly under the library's status/.
 RECTANGULAR_STYLE_FILE = espuino.STATUS_DIR / "rectangular-style.json"
+RECTANGULAR_SETTINGS_FILE = espuino.STATUS_DIR / "rectangular-settings.json"
 DEFAULT_EDGE_STYLES = {"top": "stretch", "bottom": "stretch",
                        "left": "stretch", "right": "stretch"}
+
+DEFAULT_RECTANGULAR_SETTINGS = {
+    "contentWidthCm": cards.RECTANGULAR_CONTENT_WIDTH_CM,
+    "contentHeightCm": cards.RECTANGULAR_CONTENT_HEIGHT_CM,
+    "topBleedCm": cards.RECTANGULAR_TOP_BLEED_CM,
+    "bottomBleedCm": cards.RECTANGULAR_BOTTOM_BLEED_CM,
+    "leftBleedCm": 0.0,
+    "rightBleedCm": 0.0,
+}
 
 
 def load_edge_styles() -> dict[str, str]:
@@ -183,6 +193,53 @@ def save_edge_styles(styles: dict[str, str]) -> None:
     RECTANGULAR_STYLE_FILE.write_text(json.dumps(styles, indent=2), encoding="utf-8")
 
 
+def load_rectangular_settings() -> dict[str, float]:
+    """Load persisted rectangular-card dimensions, falling back per field."""
+    try:
+        data = json.loads(RECTANGULAR_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    settings = dict(DEFAULT_RECTANGULAR_SETTINGS)
+    for key, default in DEFAULT_RECTANGULAR_SETTINGS.items():
+        value = data.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            value = float(value)
+            if value == value and value not in (float("inf"), float("-inf")):
+                if (key.startswith("content") and 0 < value <= 100) or (key.endswith("BleedCm") and 0 <= value <= 100):
+                    settings[key] = value
+    return settings
+
+
+def save_rectangular_settings(settings: dict[str, float]) -> None:
+    RECTANGULAR_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RECTANGULAR_SETTINGS_FILE.write_text(
+        json.dumps(settings, indent=2), encoding="utf-8"
+    )
+
+
+def validate_rectangular_settings(raw: object) -> dict[str, float] | None:
+    if not isinstance(raw, dict):
+        return None
+    result = {}
+    for key, default in DEFAULT_RECTANGULAR_SETTINGS.items():
+        value = raw.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value)
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        if key.startswith("content"):
+            if not 0 < value <= 100:
+                return None
+        elif not 0 <= value <= 100:
+            return None
+        result[key] = value
+    return result
+
+
 class Studio:
     def __init__(self, cfg: espuino.Config, token: str | None,
                  port: int = DEFAULT_PORT, cards_enabled: bool = True,
@@ -201,6 +258,7 @@ class Studio:
         # four edges uses which style).
         self.blur_radius = blur_radius
         self.edge_styles = load_edge_styles()
+        self.rectangular_settings = load_rectangular_settings()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.agent: studio_agent.SessionManager | None = None
 
@@ -707,6 +765,24 @@ class Studio:
                         "rectangularCards": self.rectangular_cards is not None},
             "edgeStyles": self.edge_styles,
             "edgeStyleChoices": list(cards.EDGE_STYLES),
+            "rectangularSettings": self.rectangular_settings,
+        })
+
+
+    async def h_rectangular_settings(self, request: web.Request) -> web.Response:
+        body = await _json_body(request)
+        settings = validate_rectangular_settings(body.get("rectangularSettings"))
+        if settings is None:
+            return web.json_response(
+                {"error": "Ungültige Kartenabmessungen"}, status=400
+            )
+
+        self.rectangular_settings = settings
+        save_rectangular_settings(settings)
+        self.emit({"t": "state.changed"})
+        return web.json_response({
+            "ok": True,
+            "rectangularSettings": self.rectangular_settings,
         })
 
 
@@ -985,24 +1061,26 @@ class Studio:
             for cover in covers:
                 card = cards.prepare_rectangular_card(
                     cover,
-                    cards.cm(cards.RECTANGULAR_CONTENT_WIDTH_CM),
-                    cards.cm(cards.RECTANGULAR_CONTENT_HEIGHT_CM),
-                    cards.cm(cards.RECTANGULAR_TOP_BLEED_CM),
-                    cards.cm(cards.RECTANGULAR_BOTTOM_BLEED_CM),
+                    cards.cm(self.rectangular_settings["contentWidthCm"]),
+                    cards.cm(self.rectangular_settings["contentHeightCm"]),
+                    cards.cm(self.rectangular_settings["topBleedCm"]),
+                    cards.cm(self.rectangular_settings["bottomBleedCm"]),
                     trim=True,
                     distortion=self.rectangular_cards,
                     edge_styles=styles,
                     blur_radius=self.blur_radius,
+                    left_bleed_px=cards.cm(self.rectangular_settings["leftBleedCm"]),
+                    right_bleed_px=cards.cm(self.rectangular_settings["rightBleedCm"]),
                 )
 
                 distortion = f"{self.rectangular_cards:g}"
                 stem = cover.stem
                 name = (
                     f"{stem}_"
-                    f"{cards.RECTANGULAR_PRINT_WIDTH_CM:g}x"
-                    f"{cards.RECTANGULAR_PRINT_HEIGHT_CM:g}_"
-                    f"({cards.RECTANGULAR_CONTENT_HEIGHT_CM:g}x"
-                    f"{cards.RECTANGULAR_CONTENT_WIDTH_CM:g})_"
+                    f"{self.rectangular_settings['contentWidthCm'] + self.rectangular_settings['leftBleedCm'] + self.rectangular_settings['rightBleedCm']:g}x"
+                    f"{self.rectangular_settings['contentHeightCm'] + self.rectangular_settings['topBleedCm'] + self.rectangular_settings['bottomBleedCm']:g}_"
+                    f"({self.rectangular_settings['contentHeightCm']:g}x"
+                    f"{self.rectangular_settings['contentWidthCm']:g})_"
                     f"{distortion}.jpg"
                 )
 
@@ -1458,6 +1536,7 @@ class Studio:
         app.router.add_get("/ws", self.h_ws)
         app.router.add_get("/api/state", self.h_state)
         app.router.add_post("/api/edge-styles", self.h_edge_styles)
+        app.router.add_post("/api/rectangular-settings", self.h_rectangular_settings)
         app.router.add_post("/api/device/ping", self.h_device_ping)
         app.router.add_post("/api/sync", self.h_sync)
         app.router.add_post("/api/cards/print", self.h_cards_print)

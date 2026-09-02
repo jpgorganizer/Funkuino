@@ -185,25 +185,63 @@
       <h2>Einstellungen</h2>
   
       <section class="settings-section">
+        <h3>Rechteckiges Kartenformat</h3>
+
+        <div class="settings-grid" id="rectangular-settings" style="display:flex; flex-direction:column; gap:10px;">
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Inhaltsbreite</span>
+            <span class="settings-input-unit" style="display:flex; align-items:center;"><input id="rect-content-width" class="input" style="width:120px; box-sizing:border-box;" type="number" min="0.1" max="100" step="0.1" inputmode="decimal"><span style="margin-left:6px;"> cm</span></span>
+          </label>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Inhaltshöhe</span>
+            <span class="settings-input-unit" style="display:flex; align-items:center;"><input id="rect-content-height" class="input" style="width:120px; box-sizing:border-box;" type="number" min="0.1" max="100" step="0.1" inputmode="decimal"><span style="margin-left:6px;"> cm</span></span>
+          </label>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Rand oben</span>
+            <span class="settings-input-unit" style="display:flex; align-items:center;"><input id="rect-top-bleed" class="input" style="width:120px; box-sizing:border-box;" type="number" min="0" max="100" step="0.1" inputmode="decimal"><span style="margin-left:6px;"> cm</span></span>
+          </label>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Rand unten</span>
+            <span class="settings-input-unit" style="display:flex; align-items:center;"><input id="rect-bottom-bleed" class="input" style="width:120px; box-sizing:border-box;" type="number" min="0" max="100" step="0.1" inputmode="decimal"><span style="margin-left:6px;"> cm</span></span>
+          </label>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Rand links</span>
+            <span class="settings-input-unit" style="display:flex; align-items:center;"><input id="rect-left-bleed" class="input" style="width:120px; box-sizing:border-box;" type="number" min="0" max="100" step="0.1" inputmode="decimal"><span style="margin-left:6px;"> cm</span></span>
+          </label>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Rand rechts</span>
+            <span class="settings-input-unit" style="display:flex; align-items:center;"><input id="rect-right-bleed" class="input" style="width:120px; box-sizing:border-box;" type="number" min="0" max="100" step="0.1" inputmode="decimal"><span style="margin-left:6px;"> cm</span></span>
+          </label>
+          <div class="settings-result" style="display:flex; align-items:center;">
+            <span class="field-label" style="display:inline-block; width:140px; flex:0 0 140px;">Druckgröße</span>
+            <b id="rect-print-size">–</b>
+          </div>
+        </div>
+        
+      </section>
+
+      <section class="settings-section">
         <h3>Druck-Randgestaltung</h3>
   
-        <div id="edge-style-bar" class="edge-style-bar">
-          <span class="field-label">Rand:</span>
-  
-          <label>Oben
-            <select id="edge-top" class="input"></select>
+        <div id="edge-style-bar" class="edge-style-bar" style="display:flex; flex-direction:column; align-items:flex-start; gap:10px;">
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Oben</span>
+            <select id="edge-top" class="input" style="width:120px; box-sizing:border-box;"></select>
           </label>
   
-          <label>Unten
-            <select id="edge-bottom" class="input"></select>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Unten</span>
+            <select id="edge-bottom" class="input" style="width:120px; box-sizing:border-box;"></select>
           </label>
   
-          <label>Links
-            <select id="edge-left" class="input"></select>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Links</span>
+            <select id="edge-left" class="input" style="width:120px; box-sizing:border-box;"></select>
           </label>
   
-          <label>Rechts
-            <select id="edge-right" class="input"></select>
+          <label style="display:flex; align-items:center;">
+            <span style="display:inline-block; width:140px; flex:0 0 140px;">Rechts</span>
+            <select id="edge-right" class="input" style="width:120px; box-sizing:border-box;"></select>
           </label>
         </div>
       </section>
