@@ -1154,8 +1154,6 @@ class Studio:
         return web.json_response({"ok": True})
 
     async def h_agent_token(self, request: web.Request) -> web.Response:
-        if not self.agent_enabled:
-            raise web.HTTPNotFound()
         """Store (or clear) the agent's access token from the UI.
 
         It lands in the data folder's .env, the same place the server reads at
@@ -1164,6 +1162,8 @@ class Studio:
         no restart is needed — existing sessions keep the token they started
         with, new ones get this one.
         """
+        if not self.agent_enabled:
+            raise web.HTTPNotFound()
         body = await _json_body(request)
         token = str(body.get("token") or "").strip()
         try:

@@ -403,6 +403,14 @@ cards), **Agent**, **Sync** (mirror with live log; Dry-Run always previews
 `--delete`), **Kartendruck** (the full card picker, integrated; sheets are
 `./cards --undo`-compatible).
 
+- **Optional features can be switched off at start**: `--no-cards` hides the
+  Kartendruck tab and the Druck column, `--no-agent` hides the Agent tab and the
+  Bibliothek's URL field (URL downloads run through the agent). Their
+  `/api/cards/*` and `/api/agent/*` endpoints then answer 404, and `/api/state`
+  reports both under `features`. `h_index` marks the hidden elements in the
+  served HTML, so they do not flash up before the first state arrives. The
+  flags exist on the command line only; the macOS app starts Studio without
+  them.
 - **A unit = one RFID card**, derived from the `files/` naming conventions
   (album folder, Hörspiel file, `Folge N` subfolder, Lieder track). A top-level
   folder containing a **`.album` marker file** counts as an album too (used for
