@@ -494,12 +494,18 @@ def cover_path_for(media_path: str | Path, lib_dir: str | Path,
 def join_remote(base: str, *parts: str) -> str:
     """Join remote path parts using POSIX separators, keeping a leading '/'.
 
+    The device needs an absolute path, but ``base`` (typically
+    ``cfg.remote_root``) need not start with one: ESPUINO_REMOTE_ROOT=mp3 is a
+    natural spelling. A relative "mp3/..." is accepted and silently not
+    resolved (playback answers 200 and plays nothing), so ``base`` is made
+    absolute here, once for every caller.
+
     The result is Unicode-normalised to NFC because the device stores names in
     NFC while macOS hands us decomposed (NFD) names from the local filesystem;
     without this, e.g. 'Frühling' (device) would never match 'Frühling'
     (local) and every accented file would look missing and be re-uploaded.
     """
-    path = base
+    path = "/" + str(base).lstrip("/")
     for part in parts:
         if part in ("", "."):
             continue
@@ -569,6 +575,7 @@ class ESPuino:
     def walk(self, root: str) -> Iterator[tuple[str, bool]]:
         """Depth-first walk yielding (path, is_dir); dirs come after their
         contents so they can be removed safely."""
+        root = join_remote(root)  # the top-level call gets a raw remote_root
         for name, is_dir in self.list_dir(root):
             path = join_remote(root, name)
             if is_dir:

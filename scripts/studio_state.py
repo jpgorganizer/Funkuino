@@ -53,18 +53,26 @@ def _nfc(text: str) -> str:
 DEFAULT_PLAYMODE = {"song": 1, "hoerspiel": 3, "album": 5, "folge": 5, "other": 3}
 
 
-def assignment_key(file_or_url: str) -> str:
-    """An RFID assignment's ``fileOrUrl`` -> unit-id key: strip the leading
-    slash and NFC-normalise, so it can be matched against a unit's ``id``."""
-    return _nfc(str(file_or_url or "").lstrip("/"))
+def assignment_key(file_or_url: str, remote_root: str = espuino.DEFAULT_REMOTE_ROOT) -> str:
+    """An RFID assignment's ``fileOrUrl`` -> unit-id key, so it can be matched
+    against a unit's ``id``: the path relative to ``remote_root`` (the inverse
+    of join_remote), NFC-normalised. A path outside ``remote_root`` gets ""
+    and so matches no unit -- stripped of nothing, "/Lieder/x.mp3" would claim
+    the unit "Lieder/x.mp3" that actually lives at "/mp3/Lieder/x.mp3"."""
+    s = _nfc(str(file_or_url or "").lstrip("/"))
+    root = _nfc(str(remote_root or "").strip("/"))
+    if not root:
+        return s
+    return s[len(root) + 1:] if s.startswith(root + "/") else ""
 
 
-def build_card_map(assignments: list[dict]) -> dict[str, list[str]]:
+def build_card_map(assignments: list[dict],
+                   remote_root: str = espuino.DEFAULT_REMOTE_ROOT) -> dict[str, list[str]]:
     """From ``GET /rfid`` entries, map unit-id key -> assigned card ids. Entries
     whose path matches no unit are simply never looked up by :func:`scan`."""
     out: dict[str, list[str]] = {}
     for a in assignments:
-        key = assignment_key(a.get("fileOrUrl", ""))
+        key = assignment_key(a.get("fileOrUrl", ""), remote_root)
         if key:
             out.setdefault(key, []).append(str(a.get("id")))
     return out
