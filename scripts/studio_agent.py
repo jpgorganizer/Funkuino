@@ -73,7 +73,7 @@ ALLOWED_TOOLS = [
 try:
     ALLOWED_TOOLS += [
         str(p) for p in
-        json.loads(espuino.data_or_repo(".agent-allow.json").read_text())
+        json.loads(espuino.data_or_repo(".agent-allow.json").read_text(encoding="utf-8"))
     ]
 except (OSError, ValueError):
     pass
@@ -93,7 +93,7 @@ def _extension_rules() -> tuple[list[str], list[str]]:
     ask: list[str] = []
     for manifest in sorted((espuino.DATA_ROOT / "extensions").glob("*.permissions.json")):
         try:
-            rules = json.loads(manifest.read_text())
+            rules = json.loads(manifest.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue  # a broken manifest must not take the agent down
         allow += [str(p) for p in rules.get("allow", [])]
@@ -156,9 +156,9 @@ def _system_append() -> str:
         knowledge = espuino.knowledge_file()
         if knowledge:
             with contextlib.suppress(OSError):
-                parts.append(knowledge.read_text())
+                parts.append(knowledge.read_text(encoding="utf-8"))
     with contextlib.suppress(OSError):
-        parts.append(espuino.data_or_repo("CLAUDE.local.md").read_text())
+        parts.append(espuino.data_or_repo("CLAUDE.local.md").read_text(encoding="utf-8"))
     return "\n\n".join(parts)
 # ./sync (even --dry-run) is deliberately NOT allowlisted: it does the full
 # recursive device listing outside Studio's device_lock, which would violate the

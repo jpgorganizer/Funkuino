@@ -60,7 +60,7 @@ def download_interpreter(arch: str, work: Path) -> Path:
     sums = work / f"SHA256SUMS-{RELEASE}"
     if not sums.exists():
         fetch(f"{BASE}/SHA256SUMS", sums)
-    expected = next((line.split()[0] for line in sums.read_text().splitlines()
+    expected = next((line.split()[0] for line in sums.read_text(encoding="utf-8").splitlines()
                      if line.strip().endswith(name)), None)
     if expected is None:
         raise SystemExit(f"{name} is not listed in SHA256SUMS")

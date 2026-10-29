@@ -217,7 +217,7 @@ def make_audiobook(folder: str | Path, title: str, artist: str | None = None,
             embed = _extract_cover(cover_src, cover_small)
 
         listf = tmp / "list.txt"
-        listf.write_text("".join(_concat_line(p) for p in parts))
+        listf.write_text("".join(_concat_line(p) for p in parts), encoding="utf-8")
 
         tmp_out = tmp / "out.mp3"
         cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listf)]
