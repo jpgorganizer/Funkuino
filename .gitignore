@@ -42,3 +42,9 @@ build/
 
 # Headless screenshots (dev/shot.py output, regenerated on demand)
 dev/shots/
+
+# Scratch archives of the checkout (e.g. a tar made to inspect packaging) —
+# anchored to the root, so they never get committed by accident again
+/*.tar
+/*.tar.gz
+/*.tgz

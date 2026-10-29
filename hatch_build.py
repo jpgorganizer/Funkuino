@@ -18,7 +18,7 @@ from hatchling.metadata.plugin.interface import MetadataHookInterface
 class RequirementsMetadataHook(MetadataHookInterface):
     def update(self, metadata: dict) -> None:
         requirements = []
-        for raw in (Path(self.root) / "requirements.txt").read_text().splitlines():
+        for raw in (Path(self.root) / "requirements.txt").read_text(encoding="utf-8").splitlines():
             # Strip the trailing "# what it is for" comments the file uses.
             line = raw.split("#", 1)[0].strip()
             if line and not line.startswith("-"):
