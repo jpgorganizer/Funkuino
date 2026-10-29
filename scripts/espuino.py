@@ -351,7 +351,7 @@ def read_json_state(path: Path) -> tuple[dict, str]:
     if not path.is_file():
         return {}, "missing"
     try:
-        return json.loads(path.read_text()), "ok"
+        return json.loads(path.read_text(encoding="utf-8")), "ok"
     except (ValueError, OSError):
         pass
     with contextlib.suppress(OSError):
@@ -359,7 +359,7 @@ def read_json_state(path: Path) -> tuple[dict, str]:
     backup = path.with_suffix(path.suffix + ".bak")
     if backup.is_file():
         try:
-            return json.loads(backup.read_text()), "recovered"
+            return json.loads(backup.read_text(encoding="utf-8")), "recovered"
         except (ValueError, OSError):
             pass
     return {}, "lost"
