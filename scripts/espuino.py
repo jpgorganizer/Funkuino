@@ -494,13 +494,11 @@ def cover_path_for(media_path: str | Path, lib_dir: str | Path,
 def join_remote(base: str, *parts: str) -> str:
     """Join remote path parts using POSIX separators, keeping a leading '/'.
 
-    The device always needs an absolute path, but ``base`` (typically
-    ``cfg.remote_root``) is not guaranteed to start with one -- the default
-    "/" does, but a non-default root like "mp3" does not, and joining onto it
-    directly used to yield a relative-looking "mp3/..." that the device
-    silently failed to resolve (playback: 200 OK, nothing plays; listing: an
-    incomplete top-level scan). Normalising ``base`` itself here fixes every
-    caller at once instead of requiring each one to remember to do it.
+    The device needs an absolute path, but ``base`` (typically
+    ``cfg.remote_root``) need not start with one: ESPUINO_REMOTE_ROOT=mp3 is a
+    natural spelling. A relative "mp3/..." is accepted and silently not
+    resolved (playback answers 200 and plays nothing), so ``base`` is made
+    absolute here, once for every caller.
 
     The result is Unicode-normalised to NFC because the device stores names in
     NFC while macOS hands us decomposed (NFD) names from the local filesystem;
@@ -577,10 +575,7 @@ class ESPuino:
     def walk(self, root: str) -> Iterator[tuple[str, bool]]:
         """Depth-first walk yielding (path, is_dir); dirs come after their
         contents so they can be removed safely."""
-        root = join_remote(root)  # normalise once: recursive calls already
-                                   # pass an already-normalised path via
-                                   # join_remote(root, name) below, but the
-                                   # very first, top-level call needs it too
+        root = join_remote(root)  # the top-level call gets a raw remote_root
         for name, is_dir in self.list_dir(root):
             path = join_remote(root, name)
             if is_dir:

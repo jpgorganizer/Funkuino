@@ -54,19 +54,16 @@ DEFAULT_PLAYMODE = {"song": 1, "hoerspiel": 3, "album": 5, "folge": 5, "other": 
 
 
 def assignment_key(file_or_url: str, remote_root: str = espuino.DEFAULT_REMOTE_ROOT) -> str:
-    """An RFID assignment's ``fileOrUrl`` -> unit-id key: strip the leading
-    slash, the configured remote_root prefix (join_remote's counterpart --
-    without this, any ESPUINO_REMOTE_ROOT other than the default "/" makes
-    every assignment key mismatch its unit id, e.g. "mp3/Lieder/x.mp3" never
-    matching the unit id "Lieder/x.mp3"), and NFC-normalise."""
+    """An RFID assignment's ``fileOrUrl`` -> unit-id key, so it can be matched
+    against a unit's ``id``: the path relative to ``remote_root`` (the inverse
+    of join_remote), NFC-normalised. A path outside ``remote_root`` gets ""
+    and so matches no unit -- stripped of nothing, "/Lieder/x.mp3" would claim
+    the unit "Lieder/x.mp3" that actually lives at "/mp3/Lieder/x.mp3"."""
     s = _nfc(str(file_or_url or "").lstrip("/"))
     root = _nfc(str(remote_root or "").strip("/"))
-    if root:
-        if s == root:
-            s = ""
-        elif s.startswith(root + "/"):
-            s = s[len(root) + 1:]
-    return s
+    if not root:
+        return s
+    return s[len(root) + 1:] if s.startswith(root + "/") else ""
 
 
 def build_card_map(assignments: list[dict],

@@ -30,6 +30,20 @@ def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", value) or "device"
 
 
+def _absolute_keys(files: dict[str, dict]) -> dict[str, dict]:
+    """Make every manifest key device-absolute, as join_remote now produces.
+
+    A remote_root without a leading slash ("mp3") used to yield keys like
+    "mp3/x.mp3"; left as they are, every file would look new after the update
+    and the next sync would re-upload the whole library. An absolute key
+    already present wins: it was written later."""
+    out = {k: v for k, v in files.items() if k.startswith("/")}
+    for key, entry in files.items():
+        if not key.startswith("/"):
+            out.setdefault("/" + key, entry)
+    return out
+
+
 @dataclass
 class SyncState:
     path: Path
@@ -48,7 +62,7 @@ class SyncState:
             path=path,
             device_id=data.get("device_id", device_id),
             host=host or data.get("host", ""),
-            files=data.get("files", {}),
+            files=_absolute_keys(data.get("files", {})),
             load_status=status,
         )
 
