@@ -33,7 +33,7 @@
  * @typedef {{ path: string|null, mp3: boolean, hint: string|null }} ToolState
  * @typedef {{ units?: Unit[], syncManifest?: SyncManifest, device?: Device|null, jobs?: Jobs,
  *   agent?: AgentState, rfid?: { listening: boolean }, player?: Player|null,
- *   tools?: { ffmpeg?: ToolState },
+ *   tools?: { ffmpeg?: ToolState }, prefs?: { librarySort?: "date"|"alpha" },
  *   cardsBacklog?: { newCovers?: number, perPage?: number } }} StatePayload
  * @typedef {{ phase: "probe"|"download"|"merge"|"done", item?: number, total?: number,
  *   title?: string, bytes?: number, bytesTotal?: number|null, ts?: number }} IntakeProgress
@@ -175,24 +175,6 @@ async function api(path, method = "GET", body) {
 
 /* =============================== 3. state + WS =============================== */
 
-const SORT_MODE_KEY = "funkuino:sortMode";
-
-// localStorage can throw (private browsing, disabled storage) — default to
-// "date" (the original, unchanged behaviour) rather than let that crash init.
-function loadSortMode() {
-  try {
-    return localStorage.getItem(SORT_MODE_KEY) === "alpha" ? "alpha" : "date";
-  } catch {
-    return "date";
-  }
-}
-
-function saveSortMode(mode) {
-  try {
-    localStorage.setItem(SORT_MODE_KEY, mode);
-  } catch { /* ignore: not persisted this session, still applied in-memory */ }
-}
-
 const State = {
   /** @type {StatePayload|null} */ data: null,   // last /api/state payload
   lastSeq: 0,                       // highest applied global seq
@@ -203,7 +185,7 @@ const State = {
   /** @type {Map<string, number>} */ unitSyncPct: new Map(), // unit id -> latest sync percent
   /** @type {Set<string>|null} */ knownUnitIds: null,    // prev fetch's ids; new ones flash
   /** @type {Player|null} */ player: null,               // now-playing on the device
-  /** @type {"date"|"alpha"} */ sortMode: loadSortMode(), // library sort, persisted client-side
+  /** @type {"date"|"alpha"} */ sortMode: "date",        // library sort, persisted in config.json
   /** @type {{cards?: boolean, agent?: boolean}} */ features: {},  // server-side feature flags
   _reconnecting: false,
 };
@@ -297,6 +279,8 @@ async function refreshState(refresh) {
     for (const id of [...State.unitSyncPct.keys()]) if (!State.unitSync.has(id)) State.unitSyncPct.delete(id);
     State.player = s.player || null;
     State.features = s.features || {};
+    State.sortMode = (s.prefs && s.prefs.librarySort) === "alpha" ? "alpha" : "date";
+    updateSortToggleLabel();
     applyFeatureVisibility();
     renderDeviceChip(s.device);
     renderToolBanner(s.tools);
@@ -1926,12 +1910,12 @@ function initLibrary() {
   let t;
   $("#lib-search").addEventListener("input", () => { clearTimeout(t); t = setTimeout(renderLibrary, 120); });
   $("#lib-refresh").addEventListener("click", () => refreshState(true));
-  updateSortToggleLabel();  // reflect the persisted mode on first paint
   $("#lib-sort-toggle").addEventListener("click", () => {
     State.sortMode = State.sortMode === "alpha" ? "date" : "alpha";
-    saveSortMode(State.sortMode);
     updateSortToggleLabel();
     renderLibrary();
+    api("/api/prefs", "POST", { librarySort: State.sortMode })
+      .catch((/** @type {any} */ e) => toast("Sortierung nicht gespeichert: " + e.message));
   });
   $("#lib-load").addEventListener("click", () => startLibraryDownload($("#lib-url").value));
   $("#lib-url").addEventListener("keydown", (/** @type {any} */ e) => { if (e.key === "Enter") startLibraryDownload(e.target.value); });
