@@ -48,7 +48,7 @@ class Progress:
     def _write(self) -> None:
         try:
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            tmp.write_text(json.dumps(self.snap))
+            tmp.write_text(json.dumps(self.snap), encoding="utf-8")
             tmp.replace(self.path)          # atomic: reader never sees a partial
         except OSError:
             pass  # progress is best-effort; never break a download over it

@@ -144,6 +144,15 @@ re-uploading the whole library. Callers report the outcome (`load_status`,
 makes the state unreadable to the user, and would still need the pending-marker
 semantics modelled by hand.
 
+**Every text file is read and written with `encoding="utf-8"`** — never a bare
+`read_text()` / `write_text()` / `open()`, which use the locale's charset.
+Only on macOS and UTF-8 Linux is that the same thing; under Windows (cp1252) or
+a Latin-1 locale it was not: the ffmpeg concat list (ffmpeg expects UTF-8)
+either failed to encode an en dash or named files ffmpeg could not find, and a
+`data_dir` with an umlaut in `config.json` (written as UTF-8 by the app's
+JSONEncoder) resolved to a non-existent folder, so Studio showed an empty
+library. `LC_ALL=de_DE.ISO8859-1` on a Mac reproduces such a system.
+
 The **credentials do not live in the library**: `credentials.env` (`SDK_TOKEN=…`)
 sits next to `config.json` in the config directory, because a media library gets
 copied, shared and backed up and a token should not ride along. `.env` in the

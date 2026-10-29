@@ -125,7 +125,7 @@ def write_env_value(path: Path, key: str, value: str | None) -> None:
     """
     lines = []
     try:
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         pass
     kept = [ln for ln in lines
@@ -133,7 +133,7 @@ def write_env_value(path: Path, key: str, value: str | None) -> None:
     if value:
         kept.append(f"{key}={value}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(kept).strip() + "\n")
+    path.write_text("\n".join(kept).strip() + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         path.chmod(0o600)
 
@@ -142,7 +142,7 @@ def parse_env(path: Path) -> dict[str, str]:
     """Read simple ``KEY=VALUE`` lines from a .env file (no dependency)."""
     env: dict[str, str] = {}
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return env
     for line in text.splitlines():
@@ -507,7 +507,7 @@ class Studio:
                     continue
                 seen[sid] = mtime
                 try:
-                    snap = json.loads(pf.read_text())
+                    snap = json.loads(pf.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
                 sess.progress = snap

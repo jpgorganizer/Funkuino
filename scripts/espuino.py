@@ -116,7 +116,7 @@ def _resolve_data_root() -> Path:
     if env := os.environ.get("FUNKUINO_DATA_DIR"):
         return Path(env).expanduser().resolve()
     try:
-        configured = json.loads(APP_CONFIG_FILE.read_text()).get("data_dir")
+        configured = json.loads(APP_CONFIG_FILE.read_text(encoding="utf-8")).get("data_dir")
     except (OSError, ValueError):
         configured = None
     if configured:
@@ -209,7 +209,7 @@ def _linux_install_hint() -> str:
     """Guess the package manager from /etc/os-release so the hint is copyable."""
     ids = ""
     try:
-        for line in Path("/etc/os-release").read_text().splitlines():
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
             if line.startswith(("ID=", "ID_LIKE=")):
                 ids += " " + line.partition("=")[2].strip().strip('"')
     except OSError:
@@ -382,7 +382,7 @@ def ensure_status_dir() -> Path:
     readme = STATUS_DIR / "README.txt"
     if not readme.exists():
         with contextlib.suppress(OSError):
-            readme.write_text(STATUS_README)
+            readme.write_text(STATUS_README, encoding="utf-8")
     return STATUS_DIR
 
 
